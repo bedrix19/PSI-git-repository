@@ -148,7 +148,7 @@ public final class GUI extends JFrame implements ActionListener {
 
         DefaultListModel<String> listModel = new DefaultListModel<>();
         listModel.addElement("Empty");
-        list = new JList<>(listModel);
+        list = new JList<>(listModel); // Con list = new JList<>(new DefaultListModel<>()); iría igual
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.setSelectedIndex(0);
         list.setVisibleRowCount(5);
@@ -156,8 +156,21 @@ public final class GUI extends JFrame implements ActionListener {
 
         JLabel info1 = new JLabel("Selected player info");
         JButton updatePlayersButton = new JButton("Update players");
-        updatePlayersButton.addActionListener(actionEvent -> mainAgent.updatePlayers());
 
+        // Listerners config
+        updatePlayersButton.addActionListener(actionEvent -> {
+            mainAgent.updatePlayers();
+        });
+        list.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) { // Evitar múltiples eventos para una sola selección
+                String selectedPlayer = list.getSelectedValue();
+                if (selectedPlayer != null) {
+                    info1.setText("Info: " + selectedPlayer); // Actualizar la etiqueta con la información del jugador seleccionado
+                }
+            }
+        });
+
+        // Layout config
         GridBagConstraints gc = new GridBagConstraints();
         gc.weightx = 0.5;
         gc.weighty = 0.5;
@@ -284,11 +297,14 @@ public final class GUI extends JFrame implements ActionListener {
         roundNumberRunMenu.setToolTipText("Change the number of rounds");
         roundNumberRunMenu.addActionListener(actionEvent -> logLine(JOptionPane.showInputDialog(new Frame("Configure rounds"), "How many rounds?") + " rounds"));
 
+        JMenuItem myName = new JMenuItem("Student");
+
         menuRun.add(newRunMenu);
         menuRun.add(stopRunMenu);
         menuRun.add(continueRunMenu);
         menuRun.add(roundNumberRunMenu);
         menuBar.add(menuRun);
+        menuBar.add(myName);
 
         JMenu menuWindow = new JMenu("Window");
 
