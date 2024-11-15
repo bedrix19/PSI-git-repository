@@ -1,3 +1,4 @@
+
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
@@ -96,11 +97,12 @@ public final class GUI extends JFrame implements ActionListener {
         JButton leftPanelNewButton = new JButton("New");
         leftPanelNewButton.addActionListener(actionEvent -> mainAgent.newGame());
         JButton leftPanelStopButton = new JButton("Stop");
-        leftPanelStopButton.addActionListener(this);
+        leftPanelStopButton.addActionListener(actionEvent -> mainAgent.setStop());
         JButton leftPanelContinueButton = new JButton("Continue");
-        leftPanelContinueButton.addActionListener(this);
+        leftPanelContinueButton.addActionListener(actionEvent -> mainAgent.setResume());
 
         leftPanelExtraInformation = new JLabel("Parameters:");
+        String[] pairs = mainAgent.getGameParameters().split(";");
 
         gc.fill = GridBagConstraints.HORIZONTAL;
         gc.anchor = GridBagConstraints.FIRST_LINE_START;
@@ -119,6 +121,29 @@ public final class GUI extends JFrame implements ActionListener {
         gc.gridy = 4;
         gc.weighty = 10;
         leftPanel.add(leftPanelExtraInformation, gc);
+        StringBuilder sb = new StringBuilder();
+        for (String pair : pairs) {
+            String[] keyValue = pair.split("#");
+            String key = keyValue[0];  // La clave (N, S, A)
+            String value = keyValue[1];  // El valor (3, 4, 1)
+            sb.append(key).append(" = ").append(value).append("\n");  // Añadir cada parámetro en una nueva línea
+        }
+
+        // Crear un JTextArea para mostrar la información
+        JTextArea parametersTextArea = new JTextArea(5, 20);  // 5 filas y 20 columnas
+        parametersTextArea.setText(sb.toString());  // Asignar el texto formateado
+        parametersTextArea.setEditable(false);  // No editable
+        parametersTextArea.setLineWrap(true);  // Habilitar el ajuste de línea
+        parametersTextArea.setWrapStyleWord(true);  // Ajuste de palabra
+
+        // Colocamos el JTextArea dentro de un JScrollPane
+        JScrollPane scrollPane = new JScrollPane(parametersTextArea);
+
+        // Añadir el JScrollPane al panel
+        gc.gridy = 5;  // A partir de la fila 5 (debajo de 'Parameters')
+        gc.weighty = 0.5;  // Se puede ajustar según el tamaño del cuadro de texto
+        gc.fill = GridBagConstraints.HORIZONTAL;  // Asegura que el cuadro de texto ocupe todo el ancho disponible
+        leftPanel.add(scrollPane, gc);
 
         return leftPanel;
     }
@@ -156,10 +181,22 @@ public final class GUI extends JFrame implements ActionListener {
 
         JLabel info1 = new JLabel("Selected player info");
         JButton updatePlayersButton = new JButton("Update players");
+        JButton removePlayersButton = new JButton("Remove player");
 
         // Listerners config
         updatePlayersButton.addActionListener(actionEvent -> {
             mainAgent.updatePlayers();
+        });
+        removePlayersButton.addActionListener(actionEvent -> {
+            mainAgent.printAgents();
+            String selectedPlayerName = list.getSelectedValue();
+            if (selectedPlayerName != null) {
+                logLine("Buscando "+selectedPlayerName);
+                // mainAgent.printAgentInfoByName(selectedPlayerName.split("@")[0]);
+                mainAgent.removePlayer(selectedPlayerName.split("@")[0]);
+            } else {
+                logLine("No player selected.");
+            }
         });
         list.addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) { // Evitar múltiples eventos para una sola selección
@@ -187,6 +224,8 @@ public final class GUI extends JFrame implements ActionListener {
         centralTopSubpanel.add(info1, gc);
         gc.gridy = 1;
         centralTopSubpanel.add(updatePlayersButton, gc);
+        gc.gridy = 2;
+        centralTopSubpanel.add(removePlayersButton, gc);
 
         return centralTopSubpanel;
     }
@@ -287,17 +326,27 @@ public final class GUI extends JFrame implements ActionListener {
 
         JMenuItem stopRunMenu = new JMenuItem("Stop");
         stopRunMenu.setToolTipText("Stops the execution of the current round");
-        stopRunMenu.addActionListener(this);
+        stopRunMenu.addActionListener(actionEvent -> mainAgent.setStop());
 
         JMenuItem continueRunMenu = new JMenuItem("Continue");
         continueRunMenu.setToolTipText("Resume the execution");
-        continueRunMenu.addActionListener(this);
+        continueRunMenu.addActionListener(actionEvent -> mainAgent.setResume());
 
         JMenuItem roundNumberRunMenu = new JMenuItem("Number of rounds");
         roundNumberRunMenu.setToolTipText("Change the number of rounds");
-        roundNumberRunMenu.addActionListener(actionEvent -> logLine(JOptionPane.showInputDialog(new Frame("Configure rounds"), "How many rounds?") + " rounds"));
+        roundNumberRunMenu.addActionListener(actionEvent ->
+            logLine(JOptionPane.showInputDialog(new Frame("Configure rounds"), "How many rounds?") + " rounds")
+        );
 
         JMenuItem myName = new JMenuItem("Student");
+        myName.addActionListener(actionEvent -> 
+            JOptionPane.showMessageDialog(
+                new JFrame(), // Componente padre (puede ser un JFrame ya visible o uno nuevo)
+                "Renato Josue Bedriñana Córdones", // El mensaje que deseas mostrar
+                "Name", // El título del cuadro de diálogo
+                JOptionPane.INFORMATION_MESSAGE // Tipo de mensaje
+            )
+        );
 
         menuRun.add(newRunMenu);
         menuRun.add(stopRunMenu);

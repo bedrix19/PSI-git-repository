@@ -1,6 +1,10 @@
 import jade.core.AID;
 import jade.core.Agent;
 import jade.core.behaviours.CyclicBehaviour;
+
+import java.io.FileWriter;
+import java.io.PrintWriter;
+
 import jade.domain.DFService;
 import jade.domain.FIPAAgentManagement.DFAgentDescription;
 import jade.domain.FIPAAgentManagement.ServiceDescription;
@@ -33,9 +37,29 @@ public class RandomAgent extends Agent {
             fe.printStackTrace();
         }
         addBehaviour(new Play());
-        System.out.println("RandomAgent " + getAID().getName() + " is ready.");
+        System.out.println("RandomAgent " + getAID().getName() + " is ready. ID: "+myId);
+        writeLog("RandomAgent " + getAID().getName() + " is ready. ID: "+myId);
 
     }
+
+    private void writeLog(String log) {
+		FileWriter fichero = null;
+		PrintWriter pw = null;
+		try {
+			fichero = new FileWriter("log.txt", true);
+			pw = new PrintWriter(fichero);
+		} catch (Exception e) {
+			e.printStackTrace();
+		} finally {
+			try {
+				pw.write(log + "\n");
+				if (null != fichero)
+					fichero.close();
+			} catch (Exception e2) {
+				e2.printStackTrace();
+			}
+		}
+	}
 
     protected void takeDown() {
         //Deregister from the yellow pages
@@ -56,9 +80,9 @@ public class RandomAgent extends Agent {
         @Override
         public void action() {
             System.out.println(getAID().getName() + ":" + state.name());
+            writeLog(getAID().getName() + ":" + state.name());
             msg = blockingReceive();
             if (msg != null) {
-                System.out.println(getAID().getName() + " received " + msg.getContent() + " from " + msg.getSender().getName()); //DELETEME
                 //-------- Agent logic
                 switch (state) {
                     case s0NoConfig:
@@ -73,8 +97,11 @@ public class RandomAgent extends Agent {
                             }
                             if (parametersUpdated) state = State.s1AwaitingGame;
 
+                        }  else if (msg.getContent().equals("Removed") && msg.getPerformative() == ACLMessage.INFORM) {
+                            doDelete();
                         } else {
                             System.out.println(getAID().getName() + ":" + state.name() + " - Unexpected message");
+                            writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message");
                         }
                         break;
                     case s1AwaitingGame:
@@ -110,7 +137,7 @@ public class RandomAgent extends Agent {
                         if (msg.getPerformative() == ACLMessage.REQUEST /*&& msg.getContent().startsWith("Position")*/) {
                             ACLMessage msg = new ACLMessage(ACLMessage.INFORM);
                             msg.addReceiver(mainAgent);
-                            msg.setContent("Position#" + random.nextInt(S));
+                            msg.setContent("Action#" + randomOption());
                             System.out.println(getAID().getName() + " sent " + msg.getContent());
                             send(msg);
                             state = State.s3AwaitingResult;
@@ -193,6 +220,26 @@ public class RandomAgent extends Agent {
             }
             return false;
         }
+
+        /**
+         * Agent logic to play the game
+         */
+        private String randomOption() {
+			int valorDado = (int) Math.floor(Math.random() * 2 + 1);
+			String answer = "";
+			switch (valorDado) {
+			case 1:
+				answer = "D";
+				break;
+			case 2:
+				answer = "C";
+				break;
+			default:
+				answer = "Error";
+				break;
+			}
+			return answer;
+		}
     }
 }
 
