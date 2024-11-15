@@ -181,7 +181,6 @@ public class MainAgent extends Agent {
         private void playGame(PlayerInformation player1, PlayerInformation player2, int round) {
             //Assuming player1.id < player2.id
             ACLMessage msg = new ACLMessage(ACLMessage.INFORM);
-            gui.logLine();
             if(round == 0){
                 msg.addReceiver(player1.aid);
                 msg.addReceiver(player2.aid);
