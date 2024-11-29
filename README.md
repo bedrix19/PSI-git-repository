@@ -31,4 +31,4 @@ Compilar:
 javac -d bin -cp .;jade.jar src/*.java src/agents/*.java
 
 Ejecutar:
-java -cp bin;jade.jar jade.Boot -notmp -gui -agents "MainAgent:MainAgent;agent1:RandomAgent;agent2:RandomAgent;agent3:RandomAgent"
+java -cp bin;jade.jar jade.Boot -notmp -gui -agents "MainAgent:MainAgent;agent1:agents.RandomAgent;agent2:agents.RandomAgent;agent3:agents.RandomAgent"
