@@ -3,3 +3,6 @@
 
 bin/
 jade.jar
+
+*.txt
+!readme.txt
