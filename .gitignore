@@ -1,2 +1,5 @@
 *.class
 *.txt
+
+bin/
+jade.jar
