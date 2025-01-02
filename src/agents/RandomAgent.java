@@ -102,31 +102,22 @@ public class RandomAgent extends Agent {
                         //If INFORM NEWGAME#_,_ PROCESS NEWGAME --> go to state 2
                         //If INFORM Id#_#_,_,_,_ PROCESS SETUP --> stay at s1
                         //Else ERROR
-                        //TODO I probably should check if the new game message comes from the main agent who sent the parameters
-                        if (msg.getPerformative() == ACLMessage.INFORM) {
-                            if (msg.getContent().startsWith("Id")) { //Game settings updated
-                                try {
-                                    validateSetupMessage(msg);
-                                } catch (NumberFormatException e) {
-                                    writeLog(getAID().getName() + ":" + state.name() + " - Bad message:\n\t"+msg.getContent());
-                                }
-                            } else if (msg.getContent().startsWith("NewGame")) {
-                                boolean gameStarted = false;
-                                try {
-                                    gameStarted = validateNewGame(msg.getContent());
-                                } catch (NumberFormatException e) {
-                                    writeLog(getAID().getName() + ":" + state.name() + " - Bad message:\n\t" + msg.getContent());
-                                }
-                                if (gameStarted) state = State.s2Round;
+                        //TODO I probably should check if the new game message comes from the main agent who sent the parameters (?)
+                        if (msg.getContent().startsWith("NewGame") && msg.getPerformative() == ACLMessage.INFORM){
+                            boolean gameStarted = false;
+                            try {
+                                gameStarted = validateNewGame(msg.getContent());
+                            } catch (NumberFormatException e) {
+                                writeLog(getAID().getName() + ":" + state.name() + " - Bad message:\n\t" + msg.getContent());
                             }
+                            if (gameStarted) state = State.s2Round;
                         } else {
                             writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         }
                         break;
                     case s2Round:
                         //If REQUEST POSITION --> INFORM POSITION --> go to state 3
-                        //If INFORM CHANGED stay at state 2
-                        //If INFORM ENDGAME go to state 1
+                        //If INFORM ENDGAME go to state 0
                         //Else error
                         if (msg.getContent().startsWith("Action") && msg.getPerformative() == ACLMessage.REQUEST /*&& msg.getContent().startsWith("Position")*/) {
                             ACLMessage msg = new ACLMessage(ACLMessage.INFORM);
@@ -138,7 +129,7 @@ public class RandomAgent extends Agent {
                         } else if (msg.getContent().startsWith("RoundOver") && msg.getPerformative() == ACLMessage.REQUEST) {
                             /**
                              * 
-                             * Decide si comprar, vender o no hacer nada
+                             * Choose between buy, sell or none
                              * RoundOver#ID#payoff#payoff_accumulated#inflation#assets#index
                              *
                              **/ 
@@ -149,9 +140,9 @@ public class RandomAgent extends Agent {
                             send(response);
 
                             writeLog(getAID().getName() + " decided: " + decision);
-                        } else if (msg.getPerformative() == ACLMessage.INFORM && msg.getContent().startsWith("GameOver")) {
+                        } else if (msg.getContent().startsWith("GameOver") && msg.getPerformative() == ACLMessage.INFORM) {
                             writeLog(getAID().getName() + " Total payoff: " + msg.getContent().split("#")[2]);
-                            state = State.s1AwaitingGame;
+                            state = State.s0NoConfig;
                         } else {
                             writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         }

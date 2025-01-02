@@ -108,6 +108,7 @@ public class MainAgent extends Agent {
                 gui.logLine("Player " + player.aid.getName() + " has been reset to default values.");
                 break;
             }
+        gui.updatePlayerStatus(players);
         return 0;
     }
 
@@ -120,6 +121,7 @@ public class MainAgent extends Agent {
 
             gui.logLine("Player " + player.aid.getName() + " has been reset to default values.");
         }
+        gui.updatePlayerStatus(players);
         return 0;
     }
 
@@ -161,8 +163,8 @@ public class MainAgent extends Agent {
 		doWake();
 	}
 
-    public double getIndexValue(int round) {
-        return baseIndexValue + round * 1.5; // Aumento de 1.5 por ronda
+    public double getIndexValue(int round /*, int totalBuyTransactions*/) {
+        return baseIndexValue + round * 1.5 /* + (totalBuyTransactions * 0.1) */; // Aumento de 1.5 por ronda
     }
 
     public double getInflationRate(int round) {
@@ -170,7 +172,9 @@ public class MainAgent extends Agent {
     }
 
     /*******************************************************************
-     *  getters
+     * 
+     *  Getters
+     * 
      ******************************************************************/
     public AID getAgent(String agentName){
         for (AID a : playerAgents)
@@ -194,7 +198,9 @@ public class MainAgent extends Agent {
         return "Player not found"; // Si no se encuentra el jugador
     }
     /*******************************************************************
+     * 
      *  'setters'
+     * 
      ******************************************************************/
     public void updateNumberOfRounds(int rounds) {
         parameters.setRounds(rounds);
@@ -207,7 +213,7 @@ public class MainAgent extends Agent {
     /**
      * In this behavior this agent manages the course of a match during all the
      * rounds.
-     */
+    **/
     private class GameManager extends SimpleBehaviour {
 
         @Override
@@ -218,6 +224,9 @@ public class MainAgent extends Agent {
             for (AID a : playerAgents) {
                 players.add(new PlayerInformation(a, lastId++));
             }
+            parameters.N = lastId;
+
+            // Sent initial messages to agents
             for (PlayerInformation player : players) {
                 ACLMessage msg = new ACLMessage(ACLMessage.INFORM);
                 /* Id#ID#N,R,F */
@@ -226,90 +235,106 @@ public class MainAgent extends Agent {
                 send(msg);
 				gui.logLine("Id#" + player.id + "#" + parameters.N + "," + parameters.R + "," + parameters.F);
             }
-            //Organize the matches
-            for (int i = 0; i < players.size(); i++) {
-                for (int j = i + 1; j < players.size(); j++) {
-                    if (!stop) playGame(players.get(i), players.get(j));
-                    else doWait();
-                    
-                    try{
-                        Thread.sleep(250); //Tiempo en ms
-                    }catch(InterruptedException e){
-                        //No hacemos nada
+
+            // Tournament rounds
+            for (int currentRound = 1; currentRound <= parameters.R; currentRound++) {
+                gui.logLine("Starting Round " + currentRound + " of " + parameters.R);
+                
+                // Play all matches for this round
+                for (int i = 0; i < players.size(); i++) {
+                    for (int j = i + 1; j < players.size(); j++) {
+                        if (stop) doWait();
+                        
+                        // Reset round payoff at the start of each game
+                        players.get(i).roundPayoff = 0;
+                        players.get(j).roundPayoff = 0;
+                        
+                        playGame(players.get(i), players.get(j), currentRound);
+                        
+                        try {
+                            Thread.sleep(0); // Time in ms
+                        } catch (InterruptedException e) {
+                            // Handle interruption
+                        }
                     }
                 }
+
+                // After all games in the round are complete, handle end of round
+                double currentIndex = getIndexValue(currentRound);
+                double currentInflation = getInflationRate(currentRound) / 100.0;
+                gui.logLine(String.valueOf(currentInflation));
+
+                // Apply inflation and send round over messages to all players
+                for (PlayerInformation player : players) {
+                    // Apply inflation to accumulated payoff
+                    player.accumulatedPayoff = (int)(player.accumulatedPayoff * (1 - currentInflation));
+                    
+                    // Send round over message
+                    sendRoundOverMessage(player, currentInflation, currentIndex, currentRound);
+                    
+                    // Handle player's trading decision
+                    handlePlayerResponse(player, currentIndex);
+                }
+                gui.updatePlayerStatus(players);
             }
             this.endGame();
         }
 
-        private void playGame(PlayerInformation player1, PlayerInformation player2) {
-            //Assuming player1.id < player2.id --> if not then:
+        private void playGame(PlayerInformation player1, PlayerInformation player2, int currentRound) {
+            //Assuming player1.id < player2.id, if not then:
             if(player1.id > player2.id){
                 PlayerInformation aux = player1;
                 player1 = player2;
                 player2 = aux;
             }
-            /**
-             * Round: A round in this tournament represents a complete cycle where every agent has played a match against every other agent once.
-             * NewGame: A new game refers to an individual match between two specific agents.
-             * EndGame: Once all rounds have been played, the mainAgent will send a "GameOver" message to each agent.
-             */
             ACLMessage msg = new ACLMessage(ACLMessage.INFORM);
             msg.addReceiver(player1.aid);
             msg.addReceiver(player2.aid);
             msg.setContent("NewGame#" + player1.id + "#" + player2.id);
             send(msg);
             gui.logLine("NewGame#" + player1.id + "#" + player2.id);
-            
-            for(int round = 1; round <= parameters.R; round++){
-                gui.logLine("Starting round " + round);
 
-                msg = new ACLMessage(ACLMessage.REQUEST);
-                msg.setContent("Action");
-                msg.addReceiver(player1.aid);
-                send(msg);
+            msg = new ACLMessage(ACLMessage.REQUEST);
+            msg.setContent("Action");
+            msg.addReceiver(player1.aid);
+            send(msg);
 
-                gui.logLine("Main Waiting for movement");
-                ACLMessage move1 = blockingReceive();
-                String action1 = move1.getContent().split("#")[1];
-                gui.logLine("Main Received " + move1.getContent() + " from " + move1.getSender().getName());
+            gui.logLine("Main Waiting for movement");
+            ACLMessage move1 = blockingReceive();
+            String action1 = move1.getContent().split("#")[1];
+            gui.logLine("Main Received " + move1.getContent() + " from " + move1.getSender().getName().split("@")[0]);
 
-                msg = new ACLMessage(ACLMessage.REQUEST);
-                msg.setContent("Action");
-                msg.addReceiver(player2.aid);
-                send(msg);
+            msg = new ACLMessage(ACLMessage.REQUEST);
+            msg.setContent("Action");
+            msg.addReceiver(player2.aid);
+            send(msg);
 
-                gui.logLine("Main Waiting for movement");
-                ACLMessage move2 = blockingReceive();
-                String action2 = move2.getContent().split("#")[1];
-                gui.logLine("Main Received " + move1.getContent() + " from " + move1.getSender().getName());
+            gui.logLine("Main Waiting for movement");
+            ACLMessage move2 = blockingReceive();
+            String action2 = move2.getContent().split("#")[1];
+            gui.logLine("Main Received " + move2.getContent() + " from " + move2.getSender().getName().split("@")[0]);
 
-                msg = new ACLMessage(ACLMessage.INFORM);
-                msg.addReceiver(player1.aid);
-                msg.addReceiver(player2.aid);
-                msg.setContent("Results#" + player1.id + "," + player2.id + "#" + action1 + "," + action2 + "#" + getPayoff(player1, player2, action1, action2));
-                send(msg);
-                gui.logLine(msg.getContent());
+            msg = new ACLMessage(ACLMessage.INFORM);
+            msg.addReceiver(player1.aid);
+            msg.addReceiver(player2.aid);
+            msg.setContent("Results#" + player1.id + "," + player2.id + "#" + action1 + "," + action2 + "#" + getPayoff(player1, player2, action1, action2)); // getPayoff update player's payoff
+            send(msg);
 
-                // Round manager
-                double currentIndex = getIndexValue(round);
-                double currentInflation = getInflationRate(round) / 100.0;
-
-                player1.accumulatedPayoff = (int) (player1.accumulatedPayoff * (1 - currentInflation));
-                player2.accumulatedPayoff = (int) (player2.accumulatedPayoff * (1 - currentInflation));
-
-                sendRoundOverMessage(player1, currentInflation, currentIndex, round);
-                sendRoundOverMessage(player2, currentInflation, currentIndex, round);
-
-                handlePlayerResponse(player1, currentIndex);
-                handlePlayerResponse(player2, currentIndex);
-            }
-            
+            gui.logLine(msg.getContent());
+            gui.addGameResult(currentRound,  // You'll need to track the current round
+                    player1.aid.getLocalName(),
+                    action1,
+                    player2.aid.getLocalName(),
+                    action2,
+                    player1.roundPayoff,
+                    player2.roundPayoff,
+                    getIndexValue(currentRound),
+                    getInflationRate(currentRound));
         }
 
         /******************************************************************
          * 
-         *  Manejar cada ronda
+         *  Round handler
          * 
          ******************************************************************/
         private void sendRoundOverMessage(PlayerInformation player, double inflation, double index, int round) {
@@ -325,20 +350,25 @@ public class MainAgent extends Agent {
             msg.addReceiver(player.aid);
             send(msg);
 
-            gui.logLine("Sent RoundOver message to " + player.aid.getName() + ": " + msg.getContent());
+            gui.logLine("Sent RoundOver message to " + player.aid.getName().split("@")[0] + ": " + msg.getContent());
         }
         private void handlePlayerResponse(PlayerInformation player, double indexValue) {
-            ACLMessage response = blockingReceive(); // Esperar la respuesta del jugador
+            ACLMessage response = blockingReceive();
             if (response != null) {
                 String content = response.getContent();
-                if (content.startsWith("Buy#")) {
-                    handleBuyTransaction(player, content, indexValue);
-                } else if (content.startsWith("Sell#")) {
-                    handleSellTransaction(player, content, indexValue);
-                } else if (content.startsWith("None")) {
-                    gui.logLine(player.aid.getName() + ": Doesn't want to sell or buy");
-                } else {
-                    gui.logLine("Invalid transaction message from " + player.aid.getName() + ": " + content);
+                gui.logLine("Received message from " + player.aid.getName() + ": " + content);
+
+                // Split the message to handle multiple operations
+                // We can receive both operations like Buy#x,Sell#y
+                String[] operations = content.split(",");
+                for (String operation : operations) {
+                    if (operation.startsWith("Buy#")) {
+                        handleBuyTransaction(player, operation, indexValue);
+                    } else if (operation.startsWith("Sell#")) {
+                        handleSellTransaction(player, operation, indexValue);
+                    } else {
+                        gui.logLine("Invalid operation in message from " + player.aid.getName() + ": " + operation);
+                    }
                 }
             } else {
                 gui.logLine("No response received from " + player.aid.getName());
@@ -396,7 +426,9 @@ public class MainAgent extends Agent {
         }
 
         /******************************************************************
+         * 
          * Manejar final del juego
+         *
          ******************************************************************/
         private void endGame() {
             gui.logLine("End of the game. Sending GameOver messages to all players.");
@@ -442,8 +474,8 @@ public class MainAgent extends Agent {
             }
 
             // Actualizar los payoffs actuales de los jugadores
-            player1.roundPayoff += payoff1;
-            player2.roundPayoff += payoff2;
+            player1.roundPayoff = payoff1;
+            player2.roundPayoff = payoff2;
 
             // Actualizar los payoffs acumulados de los jugadores
             player1.accumulatedPayoff += payoff1;
@@ -502,8 +534,8 @@ public class MainAgent extends Agent {
         int P;
 
         public GameParametersStruct() {
-            N = 2;
-            R = 50;
+            N = 3; // Se actualiza en GameManager.action()
+            R = 100;
             F = 0.01;
             S = 4;
             I = 0;

@@ -1,15 +1,16 @@
+Student: Renato Bedriñana Cárdenas
 PSI4/
 │
-├── bin/                  # .class compilados
+├── bin/                  # .class
 ├── src/                  # .java
 │   ├── MainAgent.java
 │   ├── GUI.java
 │   └── agents/
 │       └── RandomAgent.java
-└── jade.jar              # jade.jar (debe estar en la misma carpeta que tu proyecto)
+└── jade.jar              # jade.jar
 
-Compilar:
+Compile:
 javac -d bin -cp .;jade.jar src/*.java src/agents/*.java
 
-Ejecutar:
+Example of use:
 java -cp bin;jade.jar jade.Boot -notmp -gui -agents "MainAgent:MainAgent;agent1:agents.RandomAgent;agent2:agents.RandomAgent;agent3:agents.RandomAgent"

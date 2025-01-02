@@ -1,5 +1,6 @@
 
 import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -7,6 +8,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 
 public final class GUI extends JFrame implements ActionListener {
     JLabel leftPanelRoundsLabel;
@@ -16,6 +18,10 @@ public final class GUI extends JFrame implements ActionListener {
     private JPanel rightPanel;
     private JTextArea rightPanelLoggingTextArea;
     private LoggingOutputStream loggingOutputStream;
+
+    // For the central bottom panel
+    private JTable resultsTable;
+    private JTable playerStatusTable;
 
     public GUI() {
         initUI();
@@ -62,6 +68,44 @@ public final class GUI extends JFrame implements ActionListener {
         setVisible(true);
     }
 
+    public void addGameResult(int round, String player1, String action1, 
+                            String player2, String action2, double payoff1,
+                            double payoff2, double indexValue, double inflation) {
+        // Get the table model directly from our stored reference
+        DefaultTableModel model = (DefaultTableModel) resultsTable.getModel();
+        
+        model.addRow(new Object[]{
+            round,
+            player1,
+            action1,
+            player2,
+            action2,
+            String.format("%.2f", payoff1),
+            String.format("%.2f", payoff2),
+            String.format("%.2f", indexValue),
+            String.format("%.2f%%", inflation)
+        });
+    }
+
+    public void updatePlayerStatus(ArrayList<MainAgent.PlayerInformation> players) {
+        // To avoid java.lang.ArrayIndexOutOfBoundsException
+        // ensure proper synchronization
+        SwingUtilities.invokeLater(() -> {
+            DefaultTableModel model = (DefaultTableModel) playerStatusTable.getModel();
+            model.setRowCount(0); // Clear existing rows
+            
+            for (MainAgent.PlayerInformation player : players) {
+                model.addRow(new Object[]{
+                    player.aid.getLocalName(),
+                    player.id,
+                    player.accumulatedPayoff,
+                    String.format("%.2f", (double)player.assets),
+                    player.roundPayoff
+                });
+            }
+        });
+    }
+
     private Container createMainContentPane() {
         JPanel pane = new JPanel(new GridBagLayout());
         GridBagConstraints gc = new GridBagConstraints();
@@ -95,7 +139,13 @@ public final class GUI extends JFrame implements ActionListener {
 
         leftPanelRoundsLabel = new JLabel("Round 0 / null");
         JButton leftPanelNewButton = new JButton("New");
-        leftPanelNewButton.addActionListener(actionEvent -> mainAgent.newGame());
+        leftPanelNewButton.addActionListener(actionEvent -> {
+            mainAgent.newGame();
+            
+            // Clear the results table
+            DefaultTableModel resultsTableModel = (DefaultTableModel) resultsTable.getModel();
+            resultsTableModel.setRowCount(0); // Remove all rows from the table
+        });
         JButton leftPanelStopButton = new JButton("Stop");
         leftPanelStopButton.addActionListener(actionEvent -> mainAgent.setStop());
         JButton leftPanelContinueButton = new JButton("Continue");
@@ -124,8 +174,8 @@ public final class GUI extends JFrame implements ActionListener {
         StringBuilder sb = new StringBuilder();
         for (String pair : pairs) {
             String[] keyValue = pair.split("#");
-            String key = keyValue[0];  // La clave (N, S, A)
-            String value = keyValue[1];  // El valor (3, 4, 1)
+            String key = keyValue[0];
+            String value = keyValue[1];
             sb.append(key).append(" = ").append(value).append("\n");  // Añadir cada parámetro en una nueva línea
         }
 
@@ -141,8 +191,8 @@ public final class GUI extends JFrame implements ActionListener {
 
         // Añadir el JScrollPane al panel
         gc.gridy = 5;  // A partir de la fila 5 (debajo de 'Parameters')
-        gc.weighty = 0.5;  // Se puede ajustar según el tamaño del cuadro de texto
-        gc.fill = GridBagConstraints.HORIZONTAL;  // Asegura que el cuadro de texto ocupe todo el ancho disponible
+        gc.weighty = 0.5;
+        gc.fill = GridBagConstraints.HORIZONTAL;
         leftPanel.add(scrollPane, gc);
 
         return leftPanel;
@@ -247,51 +297,81 @@ public final class GUI extends JFrame implements ActionListener {
 
     private JPanel createCentralBottomSubpanel() {
         JPanel centralBottomSubpanel = new JPanel(new GridBagLayout());
-        
-        Object[] nullPointerWorkAround = {"*", "*", "*", "*", "*", "*", "*", "*", "*", "*"};
-
-        Object[][] data = {
-                {"*", "*", "*", "*", "*", "*", "*", "*", "*", "*"},
-                {"*", "*", "*", "*", "*", "*", "*", "*", "*", "*"},
-                {"*", "*", "*", "*", "*", "*", "*", "*", "*", "*"},
-                {"*", "*", "*", "*", "*", "*", "*", "*", "*", "*"},
-                {"*", "*", "*", "*", "*", "*", "*", "*", "*", "*"},
-                {"*", "*", "*", "*", "*", "*", "*", "*", "*", "*"},
-                {"*", "*", "*", "*", "*", "*", "*", "*", "*", "*"},
-                {"*", "*", "*", "*", "*", "*", "*", "*", "*", "*"},
-                {"*", "*", "*", "*", "*", "*", "*", "*", "*", "*"},
-                {"*", "*", "*", "*", "*", "*", "*", "*", "*", "*"},
-                {"*", "*", "*", "*", "*", "*", "*", "*", "*", "*"}
-        };
-
-        data[0][0]="Players";
-        data[0][1]="Games";
-        data[0][2]="Rounds";
-        data[0][3]="Total payoff";
-        data[0][4]="Assets";
-        
-        //Object[] columnNames = {"Players", "Games", "Rounds", "Total payoff", "Assets"};
-
-        JLabel payoffLabel = new JLabel("Player Results");
-        JTable payoffTable = new JTable(data, nullPointerWorkAround);
-        payoffTable.setTableHeader(null);
-        payoffTable.setEnabled(false);
-        
-        JScrollPane player1ScrollPane = new JScrollPane(payoffTable);
-
         GridBagConstraints gc = new GridBagConstraints();
         gc.weightx = 0.5;
         gc.fill = GridBagConstraints.BOTH;
         gc.anchor = GridBagConstraints.FIRST_LINE_START;
+        gc.gridx = 0;
 
-        gc.gridx = 0;
+        // Game results panel (top section)
         gc.gridy = 0;
-        gc.weighty = 0.5;
-        centralBottomSubpanel.add(payoffLabel, gc);
+        gc.weighty = 3; // Give more weight to the game results panel
+        JPanel gameResultsPanel = new JPanel(new BorderLayout());
+        
+        // Create game results table
+        String[] gameColumns = {
+            "Round", "Player 1", "Action", "Player 2", "Action", 
+            "P1 Payoff", "P2 Payoff", "Index Value", "Inflation"
+        };
+        DefaultTableModel gameTableModel = new DefaultTableModel(gameColumns, 0);
+        resultsTable = new JTable(gameTableModel);
+        
+        // Create detailed view
+        JTextArea detailedView = new JTextArea();
+        detailedView.setEditable(false);
+        
+        // Create split pane for game results
+        JSplitPane gamesSplitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT,
+            new JScrollPane(resultsTable),
+            new JScrollPane(detailedView)
+        );
+        gamesSplitPane.setResizeWeight(0.7);
+        
+        // Add table selection listener for game results
+        resultsTable.getSelectionModel().addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                int row = resultsTable.getSelectedRow();
+                if (row != -1) {
+                    StringBuilder detail = new StringBuilder();
+                    detail.append("Detailed Game Information:\n\n");
+                    detail.append("Round: ").append(gameTableModel.getValueAt(row, 0)).append("\n");
+                    detail.append("Player 1: ").append(gameTableModel.getValueAt(row, 1)).append("\n");
+                    detail.append("Action 1: ").append(gameTableModel.getValueAt(row, 2)).append("\n");
+                    detail.append("Player 2: ").append(gameTableModel.getValueAt(row, 3)).append("\n");
+                    detail.append("Action 2: ").append(gameTableModel.getValueAt(row, 4)).append("\n");
+                    detail.append("Payoff 1: ").append(gameTableModel.getValueAt(row, 5)).append("\n");
+                    detail.append("Payoff 2: ").append(gameTableModel.getValueAt(row, 6)).append("\n");
+                    detail.append("Index Value: ").append(gameTableModel.getValueAt(row, 7)).append("\n");
+                    detail.append("Inflation Rate: ").append(gameTableModel.getValueAt(row, 8)).append("\n");
+                    
+                    detailedView.setText(detail.toString());
+                }
+            }
+        });
+        
+        gameResultsPanel.add(gamesSplitPane, BorderLayout.CENTER);
+        centralBottomSubpanel.add(gameResultsPanel, gc);
+
+        // Player status panel (bottom section)
         gc.gridy = 1;
-        gc.gridx = 0;
-        gc.weighty = 2;
-        centralBottomSubpanel.add(player1ScrollPane, gc);
+        gc.weighty = 1; // Less weight than the game results panel
+        JPanel playerStatusPanel = new JPanel(new BorderLayout());
+        
+        // Create player status table
+        String[] playerColumns = {
+            "Player Name", "ID", "Accumulated Payoff", "Assets", "Round Payoff"
+        };
+        DefaultTableModel playerTableModel = new DefaultTableModel(playerColumns, 0);
+        playerStatusTable = new JTable(playerTableModel);
+        
+        // Add a title for the player status section
+        JLabel statusLabel = new JLabel("Player Status", SwingConstants.CENTER);
+        statusLabel.setBorder(BorderFactory.createEmptyBorder(5, 0, 5, 0));
+        playerStatusPanel.add(statusLabel, BorderLayout.NORTH);
+        playerStatusPanel.add(new JScrollPane(playerStatusTable), BorderLayout.CENTER);
+        
+        // Add the player status panel
+        centralBottomSubpanel.add(playerStatusPanel, gc);
 
         return centralBottomSubpanel;
     }
