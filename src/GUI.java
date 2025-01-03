@@ -98,8 +98,8 @@ public final class GUI extends JFrame implements ActionListener {
                 model.addRow(new Object[]{
                     player.aid.getLocalName(),
                     player.id,
-                    player.accumulatedPayoff,
-                    String.format("%.2f", (double)player.assets),
+                    String.format("%.2f", player.accumulatedPayoff),
+                    String.format("%.4f", player.assets),
                     player.roundPayoff
                 });
             }
@@ -448,8 +448,8 @@ public final class GUI extends JFrame implements ActionListener {
 
                     // Validar las restricciones
                     if (newRounds > 100 && newCommission >= 0 && newCommission <= 1) {
-                        mainAgent.updateNumberOfRounds(newRounds);
-                        mainAgent.updateCommissionFee(newCommission);
+                        mainAgent.setNumberOfRounds(newRounds);
+                        mainAgent.setCommissionFee(newCommission);
                         logLine("Parameters updated: R = " + newRounds + ", F = " + newCommission);
                     } else {
                         logLine("Invalid parameters: R must be > 100 and F must be between 0 and 1.");

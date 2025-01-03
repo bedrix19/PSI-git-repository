@@ -29,8 +29,8 @@ public class RandomAgent extends Agent {
      * S = Score
      * I = Inflation
      */
-    private int N, R, P, A, S, I;
-    private double F;
+    private int N, R, S, I;
+    private double F, A, P;
     private ACLMessage msg;
 
     private enum State {
@@ -75,7 +75,7 @@ public class RandomAgent extends Agent {
             msg = blockingReceive();
             if (msg != null) {
                 //-------- Agent logic
-                writeLog("Se recibio: "+msg.getContent());
+                writeLog(getAID().getName() + "Recibio: "+msg.getContent());
                 switch (state) {
                     case s0NoConfig:
                         //If INFORM Id#_#_,_,_,_ PROCESS SETUP --> go to state 1
@@ -100,7 +100,6 @@ public class RandomAgent extends Agent {
                         break;
                     case s1AwaitingGame:
                         //If INFORM NEWGAME#_,_ PROCESS NEWGAME --> go to state 2
-                        //If INFORM Id#_#_,_,_,_ PROCESS SETUP --> stay at s1
                         //Else ERROR
                         //TODO I probably should check if the new game message comes from the main agent who sent the parameters (?)
                         if (msg.getContent().startsWith("NewGame") && msg.getPerformative() == ACLMessage.INFORM){
@@ -126,13 +125,17 @@ public class RandomAgent extends Agent {
                             writeLog(getAID().getName() + " sent " + msg.getContent());
                             send(msg);
                             state = State.s3AwaitingResult;
-                        } else if (msg.getContent().startsWith("RoundOver") && msg.getPerformative() == ACLMessage.REQUEST) {
+                        } else if (msg.getContent().startsWith("Accounting") && msg.getPerformative() == ACLMessage.INFORM) {
+                            processAccounting(msg.getContent());
+                            state = State.s1AwaitingGame;
+                        }  else if (msg.getContent().startsWith("RoundOver") && msg.getPerformative() == ACLMessage.REQUEST) {
+                            processRoundOver(msg.getContent());
                             /**
                              * 
                              * Choose between buy, sell or none
                              * RoundOver#ID#payoff#payoff_accumulated#inflation#assets#index
                              *
-                             **/ 
+                             **/
                             ACLMessage response = new ACLMessage(ACLMessage.INFORM);
                             response.addReceiver(mainAgent);
                             String decision = decideTransaction(Double.parseDouble(msg.getContent().split("#")[6]));
@@ -240,19 +243,32 @@ public class RandomAgent extends Agent {
 		}
 
         private String decideTransaction(double indexValue) {
-            int decision = random.nextInt(3);
-            int amount = random.nextInt(5) + 1; // Cantidad aleatoria (1-5)
+            StringBuilder decision = new StringBuilder();
 
-            if (decision == 1 && P >= amount * indexValue) { // Buy
-                A += amount;
-                P -= amount * indexValue;
-                return "Buy#" + amount;
-            } else if (decision == 2 && A >= amount) { // Sell
-                A -= amount;
-                P += amount * indexValue;
-                return "Sell#" + amount;
+            // Decide to buy
+            if (random.nextBoolean() && P > 0) {  // Only try to buy if we have positive payoff
+                double maxAffordable = P / (indexValue * (1 + F));  // Consider commission fee
+                if (maxAffordable >= 1) {  // Only proceed if we can afford at least 1 unit
+                    int buyAmount = random.nextInt((int)maxAffordable) + 1;
+                    decision.append("Buy#").append(buyAmount);
+                }
             }
-            return "None"; // No hace nada
+
+            // Decide to sell
+            if (random.nextBoolean() && A > 0) {  // Only try to sell if we have assets
+                double maxSellable = A;  // Can't sell more than we have
+                if (maxSellable >= 1.0) {
+                    double sellAmount = 1.0 + random.nextDouble() * (maxSellable - 1.0);
+                    if (decision.length() > 0) {
+                        decision.append(",");
+                    }
+                    decision.append("Sell#").append(String.format("%.2f", sellAmount));
+                }
+            }
+
+            if (decision.length() == 0) return "None"; // If no decision was made, return "None"
+
+            return decision.toString();
         }
 
         private void processResults(String content) {
@@ -271,6 +287,26 @@ public class RandomAgent extends Agent {
 
             writeLog(getAID().getName() + " received payoff: " + myPayoff);
             writeLog(getAID().getName() + " accumulated payoff: " + P);
+        }
+
+        private void processAccounting(String content) {
+            // Format: "Accounting#id#payoff#assets"
+            String[] parts = content.split("#");
+            if (parts.length == 4) {
+                P = Double.parseDouble(parts[2]);
+                A = Double.parseDouble(parts[3]);
+                writeLog(getAID().getName() + " updated accounting - Payoff: " + P + ", Assets: " + A);
+            }
+        }
+
+        private void processRoundOver(String content) {
+            // Format: "RoundOver#id#roundPayoff#accumulatedPayoff#inflation#assets#index"
+            String[] parts = content.split("#");
+            if (parts.length == 7) {
+                P = Double.parseDouble(parts[3]);
+                A = Double.parseDouble(parts[5]);
+                writeLog(getAID().getName() + " round over - Payoff: " + P + ", Assets: " + A);
+            }
         }
     }
 

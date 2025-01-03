@@ -19,8 +19,8 @@ public class MainAgent extends Agent {
     private GameParametersStruct parameters = new GameParametersStruct();
     private boolean stop = false;
 
-    private double baseIndexValue = 100.0;  // Valor base del índice
-    private double baseInflationRate = 2.0; // Tasa de inflación base (%)
+    private double baseIndexValue = 5.0;// 100.0;  // Valor base del índice
+    private double baseInflationRate = 1.0;//2.0; // Tasa de inflación base (%)
 
     @Override
     protected void setup() {
@@ -44,9 +44,7 @@ public class MainAgent extends Agent {
         template.addServices(sd);
         try {
             DFAgentDescription[] result = DFService.search(this, template);
-            if (result.length > 0) {
-                gui.logLine("Found " + result.length + " players");
-            }
+            // if (result.length > 0) gui.logLine("Found " + result.length + " players");
             playerAgents = new AID[result.length];
             for (int i = 0; i < result.length; ++i) {
                 playerAgents[i] = result[i].getName();
@@ -126,7 +124,7 @@ public class MainAgent extends Agent {
     }
 
     public void printAgents(){
-        gui.logLine("Printing all player agent information:");
+        // gui.logLine("Printing all player agent information:");
         if (playerAgents == null || playerAgents.length == 0) {
             gui.logLine("No players found.");
             return;
@@ -202,11 +200,11 @@ public class MainAgent extends Agent {
      *  'setters'
      * 
      ******************************************************************/
-    public void updateNumberOfRounds(int rounds) {
+    public void setNumberOfRounds(int rounds) {
         parameters.setRounds(rounds);
     }
 
-    public void updateCommissionFee(double commission) {
+    public void setCommissionFee(double commission) {
         parameters.setCommissionFee(commission);
     }
 
@@ -233,7 +231,7 @@ public class MainAgent extends Agent {
                 msg.setContent("Id#" + player.id + "#" + parameters.N + "," + parameters.R + "," + parameters.F);
                 msg.addReceiver(player.aid);
                 send(msg);
-				gui.logLine("Id#" + player.id + "#" + parameters.N + "," + parameters.R + "," + parameters.F);
+				// gui.logLine("Id#" + player.id + "#" + parameters.N + "," + parameters.R + "," + parameters.F);
             }
 
             // Tournament rounds
@@ -262,12 +260,13 @@ public class MainAgent extends Agent {
                 // After all games in the round are complete, handle end of round
                 double currentIndex = getIndexValue(currentRound);
                 double currentInflation = getInflationRate(currentRound) / 100.0;
-                gui.logLine(String.valueOf(currentInflation));
-
+                
                 // Apply inflation and send round over messages to all players
                 for (PlayerInformation player : players) {
                     // Apply inflation to accumulated payoff
+                    gui.logLine("After inflation "+player.toString());
                     player.accumulatedPayoff = (int)(player.accumulatedPayoff * (1 - currentInflation));
+                    gui.logLine("Before "+(player.toString()));
                     
                     // Send round over message
                     sendRoundOverMessage(player, currentInflation, currentIndex, currentRound);
@@ -366,10 +365,15 @@ public class MainAgent extends Agent {
                         handleBuyTransaction(player, operation, indexValue);
                     } else if (operation.startsWith("Sell#")) {
                         handleSellTransaction(player, operation, indexValue);
+                    } else if (operation.startsWith("None")) {
+                        gui.logLine("Agent " + player.aid.getName() + " did not perform any transaction.");
                     } else {
                         gui.logLine("Invalid operation in message from " + player.aid.getName() + ": " + operation);
                     }
                 }
+
+                // Send accounting message to the player
+                sendAccountingMessage(player);
             } else {
                 gui.logLine("No response received from " + player.aid.getName());
             }
@@ -386,8 +390,6 @@ public class MainAgent extends Agent {
                 player.accumulatedPayoff -= totalCost;
                 player.assets += amountToBuy / indexValue;
 
-                // Enviar mensaje de confirmación al jugador
-                sendAccountingMessage(player);
                 gui.logLine(player.aid.getName() + " successfully bought assets for " + amountToBuy + " units. Fee: " + fee);
             } else {
                 gui.logLine(player.aid.getName() + " does not have enough payoff units to buy " + amountToBuy + " units.");
@@ -405,8 +407,6 @@ public class MainAgent extends Agent {
                 player.assets -= amountToSell;
                 player.accumulatedPayoff += (saleRevenue - fee);
 
-                // Enviar mensaje de confirmación al jugador
-                sendAccountingMessage(player);
                 gui.logLine(player.aid.getName() + " successfully sold " + amountToSell + " assets. Revenue: " + saleRevenue + ", Fee: " + fee);
             } else {
                 gui.logLine(player.aid.getName() + " does not have enough assets to sell " + amountToSell + " units.");
@@ -432,17 +432,32 @@ public class MainAgent extends Agent {
          ******************************************************************/
         private void endGame() {
             gui.logLine("End of the game. Sending GameOver messages to all players.");
-
+            double finalIndexValue = getIndexValue(parameters.R);  // Get index value at last round
+                
             for (PlayerInformation player : players) {
-                ACLMessage msg = new ACLMessage(ACLMessage.REQUEST);
-
-                msg.setContent("GameOver#" + player.id + "#" + player.accumulatedPayoff);
-
+                // Calculate assets value
+                double assetsValue = player.assets * finalIndexValue;
+                
+                // Apply commission fee for liquidating assets
+                double liquidationFee = assetsValue * parameters.F;
+                double netAssetsValue = assetsValue - liquidationFee;
+                
+                // Add liquidated assets value to final payoff
+                double finalPayoff = player.accumulatedPayoff + netAssetsValue;
+                
+                // Send GameOver message
+                ACLMessage msg = new ACLMessage(ACLMessage.INFORM);
+                msg.setContent(String.format("GameOver#%d#%.2f", player.id, finalPayoff));
                 msg.addReceiver(player.aid);
                 send(msg);
-                gui.logLine("Sent GameOver message to " + player.aid.getName() + ": " + msg.getContent());
+                // gui.logLine(player.toString());
+                gui.logLine(String.format("%s final - Assets: %.2f, Value: %.2f, Fee: %.2f, Total Payoff: %.2f",
+                    player.aid.getName(),
+                    player.assets,
+                    assetsValue,
+                    liquidationFee,
+                    finalPayoff));
             }
-            gui.logLine("GameOver messages sent. Tournament completed.");
         }
 
         private String getPayoff(PlayerInformation player1, PlayerInformation player2, String action1, String action2) {
@@ -501,15 +516,15 @@ public class MainAgent extends Agent {
         AID aid;
         int id;
 		int roundPayoff;
-        int accumulatedPayoff;
-        int assets;
+        double accumulatedPayoff;
+        double assets;
 
         public PlayerInformation(AID a, int i) {
             aid = a;
             id = i;
 			roundPayoff = 0;
-            accumulatedPayoff = 0;
-            assets = 0;
+            accumulatedPayoff = 0.0;
+            assets = 0.0;
         }
 
         @Override
@@ -557,42 +572,3 @@ public class MainAgent extends Agent {
         }
     }
 }
-
-/**
- * Primera idea de hacer que las rondas terminen para todos
- * 
- * private void endRound(PlayerInformation player1, PlayerInformation player2, int round){
-            gui.logLine("End of the round. Sending RoundOver messages to all players.");
-
-            double currentIndex = getIndexValue(round);
-            double currentInflation = getInflationRate(round);
-
-            // un for-each para enviar el mensaje de RoundOver a cada jugador
-            for (PlayerInformation player : players) {
-                ACLMessage msg = new ACLMessage(ACLMessage.REQUEST);
-
-                msg.setContent("RoundOver#" + player.id + "#" 
-                                + player.roundPayoff + "#" 
-                                + player.accumulatedPayoff + "#" 
-                                + currentInflation + "#" 
-                                + player.assets + "#" 
-                                + currentIndex);
-
-                msg.addReceiver(player.aid);
-                send(msg);
-
-                gui.logLine("Sent RoundOver message to " + player.aid.getName() + ": " + msg.getContent());
-
-                // logica para manejar las respuestas
-                ACLMessage response = blockingReceive(); // Esperar respuesta del agente
-
-                if (response.getContent().startsWith("Buy#")) {
-                        handleBuyTransaction(player, response.getContent(), currentIndex);
-                } else if (response.getContent().startsWith("Sell#")) {
-                    handleSellTransaction(player, response.getContent(), currentIndex);
-                } else {
-                    gui.logLine("Invalid transaction message: " + response.getContent());
-                }
-            }
-        }
- */
