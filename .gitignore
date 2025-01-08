@@ -1,10 +1,9 @@
 PSI4*
 
+*.out
 *.class
 *.txt
+!readme.txt
 
 bin/
 jade.jar
-
-*.txt
-!readme.txt

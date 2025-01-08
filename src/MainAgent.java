@@ -1,4 +1,3 @@
-
 import jade.core.AID;
 import jade.core.Agent;
 import jade.core.behaviours.SimpleBehaviour;
@@ -33,7 +32,7 @@ public class MainAgent extends Agent {
 
     /******************************************************************
     * 
-    *   Players actions
+    *   Players actions (managing players)
     * 
     ******************************************************************/
     public int updatePlayers() {
@@ -150,25 +149,6 @@ public class MainAgent extends Agent {
         return 0;
     }
 
-    public void setStop() {
-        gui.logLine("Stop the game");
-		stop = true;
-	}
-
-	public void setResume() {
-        gui.logLine("Resume the game");
-		stop = false;
-		doWake();
-	}
-
-    public double getIndexValue(int round /*, int totalBuyTransactions*/) {
-        return baseIndexValue + round * 1.5 /* + (totalBuyTransactions * 0.1) */; // Aumento de 1.5 por ronda
-    }
-
-    public double getInflationRate(int round) {
-        return baseInflationRate + (round * 0.1); // Aumento de 0.1% por ronda
-    }
-
     /*******************************************************************
      * 
      *  Getters
@@ -195,9 +175,18 @@ public class MainAgent extends Agent {
             if (player.id == id) return player.toString();
         return "Player not found"; // Si no se encuentra el jugador
     }
+
+    public double getIndexValue(int round /*, int totalBuyTransactions*/) {
+        return baseIndexValue + round * 1.5 /* + (totalBuyTransactions * 0.1) */; // Aumento de 1.5 por ronda
+    }
+
+    public double getInflationRate(int round) {
+        return baseInflationRate + (round * 0.1); // Aumento de 0.1% por ronda
+    }
+
     /*******************************************************************
      * 
-     *  'setters'
+     *  Setters
      * 
      ******************************************************************/
     public void setNumberOfRounds(int rounds) {
@@ -207,6 +196,17 @@ public class MainAgent extends Agent {
     public void setCommissionFee(double commission) {
         parameters.setCommissionFee(commission);
     }
+
+    public void setStop() {
+        gui.logLine("Stop the game");
+		stop = true;
+	}
+
+	public void setResume() {
+        gui.logLine("Resume the game");
+		stop = false;
+		doWake();
+	}
 
     /**
      * In this behavior this agent manages the course of a match during all the
@@ -252,7 +252,7 @@ public class MainAgent extends Agent {
                         try {
                             Thread.sleep(0); // Time in ms
                         } catch (InterruptedException e) {
-                            // Handle interruption
+                            // do nothing
                         }
                     }
                 }
@@ -264,9 +264,7 @@ public class MainAgent extends Agent {
                 // Apply inflation and send round over messages to all players
                 for (PlayerInformation player : players) {
                     // Apply inflation to accumulated payoff
-                    gui.logLine("After inflation "+player.toString());
                     player.accumulatedPayoff = (int)(player.accumulatedPayoff * (1 - currentInflation));
-                    gui.logLine("Before "+(player.toString()));
                     
                     // Send round over message
                     sendRoundOverMessage(player, currentInflation, currentIndex, currentRound);
@@ -433,7 +431,9 @@ public class MainAgent extends Agent {
         private void endGame() {
             gui.logLine("End of the game. Sending GameOver messages to all players.");
             double finalIndexValue = getIndexValue(parameters.R);  // Get index value at last round
-                
+
+            StringBuilder finalScores = new StringBuilder("Final Scores:\n\n");
+
             for (PlayerInformation player : players) {
                 // Calculate assets value
                 double assetsValue = player.assets * finalIndexValue;
@@ -450,7 +450,7 @@ public class MainAgent extends Agent {
                 msg.setContent(String.format("GameOver#%d#%.2f", player.id, finalPayoff));
                 msg.addReceiver(player.aid);
                 send(msg);
-                // gui.logLine(player.toString());
+
                 gui.logLine(String.format("%s final - Assets: %.2f, Value: %.2f, Fee: %.2f, Total Payoff: %.2f",
                     player.aid.getName(),
                     player.assets,
@@ -458,6 +458,7 @@ public class MainAgent extends Agent {
                     liquidationFee,
                     finalPayoff));
             }
+            gui.updateFinalScores(players, finalIndexValue, parameters.F);
         }
 
         private String getPayoff(PlayerInformation player1, PlayerInformation player2, String action1, String action2) {

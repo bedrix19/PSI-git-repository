@@ -19,9 +19,10 @@ public final class GUI extends JFrame implements ActionListener {
     private JTextArea rightPanelLoggingTextArea;
     private LoggingOutputStream loggingOutputStream;
 
-    // For the central bottom panel
-    private JTable resultsTable;
-    private JTable playerStatusTable;
+    // For the central (2nd) panel
+    private JTable resultsTable;        // top section
+    private JTable playerStatusTable;   // middle section
+    private JTable finalScoresTable;    // bottom section
 
     public GUI() {
         initUI();
@@ -63,7 +64,7 @@ public final class GUI extends JFrame implements ActionListener {
         setMinimumSize(new Dimension(600, 400));
         setPreferredSize(new Dimension(1000, 600));
         setJMenuBar(createMainMenuBar());
-        setContentPane(createMainContentPane());
+        setContentPane(createMainContentPanel());
         pack();
         setVisible(true);
     }
@@ -106,7 +107,28 @@ public final class GUI extends JFrame implements ActionListener {
         });
     }
 
-    private Container createMainContentPane() {
+    public void updateFinalScores(ArrayList<MainAgent.PlayerInformation> players, double finalIndexValue, double commissionFee) {
+        SwingUtilities.invokeLater(() -> {
+            DefaultTableModel model = (DefaultTableModel) finalScoresTable.getModel();
+            model.setRowCount(0); // Clear existing rows
+            
+            for (MainAgent.PlayerInformation player : players) {
+                double assetsValue = player.assets * finalIndexValue;
+                double liquidationFee = assetsValue * commissionFee;
+                double finalPayoff = player.accumulatedPayoff + (assetsValue - liquidationFee);
+                
+                model.addRow(new Object[]{
+                    player.aid.getLocalName(),
+                    String.format("%.4f", player.assets),
+                    String.format("%.2f", assetsValue),
+                    String.format("%.2f", liquidationFee),
+                    String.format("%.2f", finalPayoff)
+                });
+            }
+        });
+    }
+
+    private Container createMainContentPanel() {
         JPanel pane = new JPanel(new GridBagLayout());
         GridBagConstraints gc = new GridBagConstraints();
         gc.fill = GridBagConstraints.BOTH;
@@ -235,9 +257,7 @@ public final class GUI extends JFrame implements ActionListener {
         JButton resetPlayersButton = new JButton("Reset player statistics");
 
         // Listerners config
-        updatePlayersButton.addActionListener(actionEvent -> {
-            mainAgent.updatePlayers();
-        });
+        updatePlayersButton.addActionListener(actionEvent -> mainAgent.updatePlayers());
         removePlayersButton.addActionListener(actionEvent -> {
             mainAgent.printAgents();
             String selectedPlayerName = list.getSelectedValue();
@@ -298,14 +318,18 @@ public final class GUI extends JFrame implements ActionListener {
     private JPanel createCentralBottomSubpanel() {
         JPanel centralBottomSubpanel = new JPanel(new GridBagLayout());
         GridBagConstraints gc = new GridBagConstraints();
-        gc.weightx = 0.5;
+        gc.weightx = 1;
         gc.fill = GridBagConstraints.BOTH;
         gc.anchor = GridBagConstraints.FIRST_LINE_START;
         gc.gridx = 0;
 
-        // Game results panel (top section)
+        /******************************************************************
+         * 
+         * Game results panel (top section)
+         * 
+         ******************************************************************/
         gc.gridy = 0;
-        gc.weighty = 3; // Give more weight to the game results panel
+        gc.weighty = 0.6;
         JPanel gameResultsPanel = new JPanel(new BorderLayout());
         
         // Create game results table
@@ -315,7 +339,7 @@ public final class GUI extends JFrame implements ActionListener {
         };
         DefaultTableModel gameTableModel = new DefaultTableModel(gameColumns, 0);
         resultsTable = new JTable(gameTableModel);
-        
+    
         // Create detailed view
         JTextArea detailedView = new JTextArea();
         detailedView.setEditable(false);
@@ -352,26 +376,51 @@ public final class GUI extends JFrame implements ActionListener {
         gameResultsPanel.add(gamesSplitPane, BorderLayout.CENTER);
         centralBottomSubpanel.add(gameResultsPanel, gc);
 
-        // Player status panel (bottom section)
+        /******************************************************************
+         * 
+         * Player status panel (middle section)
+         * 
+         ******************************************************************/
         gc.gridy = 1;
-        gc.weighty = 1; // Less weight than the game results panel
+        gc.weighty = 0.2;
         JPanel playerStatusPanel = new JPanel(new BorderLayout());
         
         // Create player status table
-        String[] playerColumns = {
-            "Player Name", "ID", "Accumulated Payoff", "Assets", "Round Payoff"
-        };
+        String[] playerColumns = {"Player Name", "ID", "Accumulated Payoff", "Assets", "Round Payoff"};
         DefaultTableModel playerTableModel = new DefaultTableModel(playerColumns, 0);
         playerStatusTable = new JTable(playerTableModel);
         
         // Add a title for the player status section
         JLabel statusLabel = new JLabel("Player Status", SwingConstants.CENTER);
-        statusLabel.setBorder(BorderFactory.createEmptyBorder(5, 0, 5, 0));
+        statusLabel.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
         playerStatusPanel.add(statusLabel, BorderLayout.NORTH);
         playerStatusPanel.add(new JScrollPane(playerStatusTable), BorderLayout.CENTER);
         
         // Add the player status panel
         centralBottomSubpanel.add(playerStatusPanel, gc);
+
+
+        /******************************************************************
+         * 
+         * Final scores panel (bottom section)
+         * 
+         ******************************************************************/
+        gc.gridy = 2;
+        gc.weighty = 0.2;
+        JPanel finalScoresPanel = new JPanel(new BorderLayout());
+        
+        JLabel finalScoresLabel = new JLabel("Final Scores", SwingConstants.CENTER);
+        finalScoresLabel.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+    
+        // Create final scores table
+        String[] finalScoreColumns = {"Player Name", "Assets", "Asset Value", "Fee", "Total Payoff"};
+        DefaultTableModel finalScoreModel = new DefaultTableModel(finalScoreColumns, 0);
+        finalScoresTable = new JTable(finalScoreModel);
+        
+        finalScoresPanel.add(finalScoresLabel, BorderLayout.NORTH);
+        finalScoresPanel.add(new JScrollPane(finalScoresTable), BorderLayout.CENTER);
+        
+        centralBottomSubpanel.add(finalScoresPanel, gc);
 
         return centralBottomSubpanel;
     }
@@ -480,9 +529,7 @@ public final class GUI extends JFrame implements ActionListener {
 
         JMenuItem roundNumberRunMenu = new JMenuItem("Number of rounds");
         roundNumberRunMenu.setToolTipText("Change the number of rounds");
-        roundNumberRunMenu.addActionListener(actionEvent ->
-            logLine(JOptionPane.showInputDialog(new Frame("Configure rounds"), "How many rounds?") + " rounds")
-        );
+        roundNumberRunMenu.addActionListener(actionEvent -> logLine(JOptionPane.showInputDialog(new Frame("Configure rounds"), "How many rounds?") + " rounds"));
 
         JMenu myName = new JMenu("Student");
         JMenuItem menuHelpButton = new JMenuItem("Autor: Renato Josue Bedriñana Cárdenas");
