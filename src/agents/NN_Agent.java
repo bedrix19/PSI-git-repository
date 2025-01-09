@@ -3,20 +3,18 @@ package agents;
 import jade.core.AID;
 import jade.core.Agent;
 import jade.core.behaviours.CyclicBehaviour;
-
-import java.io.FileWriter;
-import java.io.PrintWriter;
-
 import jade.domain.DFService;
 import jade.domain.FIPAAgentManagement.DFAgentDescription;
 import jade.domain.FIPAAgentManagement.ServiceDescription;
 import jade.domain.FIPAException;
 import jade.lang.acl.ACLMessage;
 
+import java.io.FileWriter;
+import java.io.PrintWriter;
 import java.util.Random;
+import java.util.Locale;
 
-public class RandomAgent extends Agent {
-
+public class NN_Agent extends Agent {
     private State state;
     private AID mainAgent;
     private int myId, opponentId;
@@ -32,18 +30,19 @@ public class RandomAgent extends Agent {
     private int N, R, S, I;
     private double F, A, P;
     private ACLMessage msg;
-
+    private SOM neuralNet;
+    private String currentState;
+    
     private enum State {
         s0NoConfig, s1AwaitingGame, s2Round, s3AwaitingResult
     }
 
+    @Override
     protected void setup() {
-        state = State.s0NoConfig;
-
-        //clean the .out
         clearLog();
-
-        //Register in the yellow pages as a player
+        state = State.s0NoConfig;
+        neuralNet = new SOM(5, 4); // 5x5 grid, 4 input dimensions
+        
         DFAgentDescription dfd = new DFAgentDescription();
         dfd.setName(getAID());
         ServiceDescription sd = new ServiceDescription();
@@ -56,71 +55,45 @@ public class RandomAgent extends Agent {
             fe.printStackTrace();
         }
         addBehaviour(new Play());
-        writeLog("RandomAgent " + getAID().getName() + " is ready.");
-
-    }
-
-    protected void takeDown() {
-        //Deregister from the yellow pages
-        try {
-            DFService.deregister(this);
-        } catch (FIPAException e) {
-            e.printStackTrace();
-        }
-        writeLog("RandomPlayer: " + getAID().getName() + " deregistering from yellow pages.");
+        writeLog("NNAgent " + getAID().getName() + " is ready.");
     }
 
     private class Play extends CyclicBehaviour {
-        Random random = new Random(1000);
         @Override
         public void action() {
             msg = blockingReceive();
             if (msg != null) {
-                //-------- Agent logic
                 writeLog(getAID().getName() + ":" + state.name());
-                writeLog(getAID().getName() + "Recibio: "+msg.getContent());
+                writeLog(getAID().getName() + "Recibio: " + msg.getContent());
+                
                 switch (state) {
                     case s0NoConfig:
-                        //If INFORM Id#_#_,_,_,_ PROCESS SETUP --> go to state 1
-                        //Else ERROR
                         if (msg.getContent().startsWith("Id") && msg.getPerformative() == ACLMessage.INFORM) {
-                            boolean parametersUpdated = false;
                             try {
-                                if(validateSetupMessage(msg)){
-                                    writeLog("RandomAgent " + getAID().getName() + " is up with ID:" + myId);
+                                if (validateSetupMessage(msg)) {
+                                    writeLog("NNAgent " + getAID().getName() + " is up with ID:" + myId);
                                     state = State.s1AwaitingGame;
                                 }
                             } catch (NumberFormatException e) {
-                                writeLog(getAID().getName() + ":" + state.name() + " - Bad message:\n\t"+msg.getContent());
+                                writeLog(getAID().getName() + ": Bad configuration message");
                             }
-
-                        }  else if (msg.getContent().equals("Removed") && msg.getPerformative() == ACLMessage.INFORM) {
+                        } else if (msg.getContent().equals("Removed") && msg.getPerformative() == ACLMessage.INFORM) {
                             doDelete();
-                        } else {
-                            writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t"+msg.getContent());
                         }
                         break;
+
                     case s1AwaitingGame:
-                        //If INFORM NEWGAME#_,_ PROCESS NEWGAME --> go to state 2
-                        //Else ERROR
-                        //TODO I probably should check if the new game message comes from the main agent who sent the parameters (?)
-                        if (msg.getContent().startsWith("NewGame") && msg.getPerformative() == ACLMessage.INFORM){
+                        if (msg.getContent().startsWith("NewGame") && msg.getPerformative() == ACLMessage.INFORM) {
                             try {
-                                if(validateNewGame(msg.getContent())){
+                                if (validateNewGame(msg.getContent())) {
                                     writeLog(getAID().getName() + " is playing against " + opponentId);
                                     state = State.s2Round;
                                 }
                             } catch (NumberFormatException e) {
-                                writeLog(getAID().getName() + ":" + state.name() + " - Bad message:\n\t" + msg.getContent());
+                                writeLog(getAID().getName() + ": Bad new game message");
                             }
-                        }  else if (msg.getContent().startsWith("RoundOver") && msg.getPerformative() == ACLMessage.REQUEST) {
+                        } else if (msg.getContent().startsWith("RoundOver") && msg.getPerformative() == ACLMessage.REQUEST) {
                             processRoundOver(msg.getContent());
-                            /**
-                             * 
-                             * Choose between buy, sell or none
-                             * RoundOver#ID#payoff#payoff_accumulated#inflation#assets#index
-                             *
-                             **/
                             ACLMessage response = new ACLMessage(ACLMessage.INFORM);
                             response.addReceiver(mainAgent);
                             String decision = decideTransaction(Double.parseDouble(msg.getContent().split("#")[6]));
@@ -132,31 +105,28 @@ public class RandomAgent extends Agent {
                         } else if (msg.getContent().startsWith("GameOver") && msg.getPerformative() == ACLMessage.INFORM) {
                             writeLog(getAID().getName() + " Total payoff: " + msg.getContent().split("#")[2]);
                             state = State.s0NoConfig;
-                        } else writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
+                        } else {
+                            writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
+                        }
                         break;
+
                     case s2Round:
-                        //If REQUEST POSITION --> INFORM POSITION --> go to state 3
-                        //If INFORM ENDGAME go to state 0
-                        //Else error
-                        if (msg.getContent().startsWith("Action") && msg.getPerformative() == ACLMessage.REQUEST /*&& msg.getContent().startsWith("Position")*/) {
-                            ACLMessage msg = new ACLMessage(ACLMessage.INFORM);
-                            msg.addReceiver(mainAgent);
-                            msg.setContent("Action#" + randomOption());
-                            writeLog(getAID().getName() + " sent " + msg.getContent());
-                            send(msg);
+                        if (msg.getContent().startsWith("Action") && msg.getPerformative() == ACLMessage.REQUEST) {
+                            ACLMessage response = new ACLMessage(ACLMessage.INFORM);
+                            response.addReceiver(mainAgent);
+                            String action = chooseAction();
+                            response.setContent("Action#" + action);
+                            send(response);
                             state = State.s3AwaitingResult;
                         } else writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         break;
+
                     case s3AwaitingResult:
-                        //If INFORM RESULTS --> go to state 2
-                        //Else error
                         if (msg.getPerformative() == ACLMessage.INFORM && msg.getContent().startsWith("Results")) {
-                            // Procesar resultados
                             processResults(msg.getContent());
                             state = State.s1AwaitingGame;
                         } else writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         break;
-
                 }
             }
         }
@@ -217,60 +187,50 @@ public class RandomAgent extends Agent {
             return false;
         }
 
-        /**
-         * Agent logic to play the game
-         */
-        private String randomOption() {
-			int valorDado = (int) Math.floor(Math.random() * 2 + 1);
-			String answer = "";
-			switch (valorDado) {
-			case 1:
-				answer = "D";
-				break;
-			case 2:
-				answer = "C";
-				break;
-			default:
-				answer = "Error";
-				break;
-			}
-			return answer;
-		}
+        private String chooseAction() {
+            double[] input = createInputVector();
+            String bmuPos = neuralNet.sGetBMU(input, true);
+            double[] weights = neuralNet.dGetNeuronWeights(
+                Integer.parseInt(bmuPos.split(",")[0]), 
+                Integer.parseInt(bmuPos.split(",")[1])
+            );
+            return weights[0] > 0.5 ? "C" : "D";
+        }
 
         private String decideTransaction(double indexValue) {
-            StringBuilder decision = new StringBuilder();
-
-            // Decide to buy
-            if (random.nextBoolean() && P > 0) {  // Only try to buy if we have positive payoff
-                double maxAffordable = P / (indexValue * (1 + F));  // Consider commission fee
-                if (maxAffordable >= 1) {  // Only proceed if we can afford at least 1 unit
-                    int buyAmount = random.nextInt((int)maxAffordable) + 1;
-                    decision.append("Buy#").append(buyAmount);
-                }
-            }
-
-            // Decide to sell
-            if (random.nextBoolean() && A > 0) {  // Only try to sell if we have assets
-                double maxSellable = A;  // Can't sell more than we have
-                if (maxSellable >= 1.0) {
-                    double sellAmount = 1.0 + random.nextDouble() * (maxSellable - 1.0);
-                    if (decision.length() > 0) {
-                        decision.append(",");
+            double[] input = createInputVector();
+            String bmuPos = neuralNet.sGetBMU(input, true);
+            double[] weights = neuralNet.dGetNeuronWeights(
+                Integer.parseInt(bmuPos.split(",")[0]), 
+                Integer.parseInt(bmuPos.split(",")[1])
+            );
+            
+            if (weights[2] > 0.66) { // Buy decision
+                if (P > 0) {
+                    double maxAffordable = P / (indexValue * (1 + F));
+                    if (maxAffordable >= 1) {
+                        return "Buy#1";
                     }
-                    decision.append("Sell#").append(String.format("%.2f", sellAmount));
+                }
+            } else if (weights[2] > 0.33) { // Sell decision
+                if (A > 0) {
+                    return "Sell#1";
                 }
             }
+            return "None";
+        }
 
-            if (decision.length() == 0) return "None"; // If no decision was made, return "None"
-
-            return decision.toString();
+        private double[] createInputVector() {
+            double[] input = new double[4];
+            input[0] = P / 100.0; // Normalized payoff
+            input[1] = A / 10.0;  // Normalized assets
+            input[2] = opponentId / (double)N; // Normalized opponent ID
+            input[3] = state == State.s2Round ? 1.0 : 0.0; // Game state
+            return input;
         }
 
         private void processResults(String content) {
-            /**
-             * Results#4,7#D,C#4,0 means that in a round between players 4 and 7, the former
-             * chose D and the latter chose C, so they get the payoffs of 4 and 0, respectively.
-             */
+            // Format: "Results#id1,id2#action1,action2#result1,result2"
             String[] parts = content.split("#");
             String[] idmsg = parts[1].split(",");
             String[] payoffs = parts[3].split(",");
@@ -305,11 +265,93 @@ public class RandomAgent extends Agent {
         }
     }
 
+    // Include the SOM class here
+    private class SOM {
+        private int iGridSide;
+        private int iInputSize;
+        private double dLearnRate = 1.0;
+        private double dDecLearnRate = 0.999;
+        private double[][][] dGrid;
+
+        public SOM(int gridSize, int inputSize) {
+            iGridSide = gridSize;
+            iInputSize = inputSize;
+            dGrid = new double[iGridSide][iGridSide][iInputSize];
+            initializeGrid();
+        }
+
+        private void initializeGrid() {
+            for (int i = 0; i < iGridSide; i++)
+                for (int j = 0; j < iGridSide; j++)
+                    for (int k = 0; k < iInputSize; k++)
+                        dGrid[i][j][k] = Math.random();
+        }
+
+        public String sGetBMU(double[] input, boolean train) {
+            int bmuX = 0, bmuY = 0;
+            double minDist = Double.MAX_VALUE;
+
+            // Find BMU
+            for (int i = 0; i < iGridSide; i++) {
+                for (int j = 0; j < iGridSide; j++) {
+                    double dist = calculateDistance(input, dGrid[i][j]);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        bmuX = i;
+                        bmuY = j;
+                    }
+                }
+            }
+
+            // Update weights if training
+            if (train) {
+                updateWeights(input, bmuX, bmuY);
+                dLearnRate *= dDecLearnRate;
+            }
+
+            return bmuX + "," + bmuY;
+        }
+
+        public double[] dGetNeuronWeights(int x, int y) {
+            return dGrid[x][y];
+        }
+
+        private double calculateDistance(double[] input, double[] weights) {
+            double sum = 0;
+            for (int i = 0; i < input.length; i++) {
+                sum += Math.pow(input[i] - weights[i], 2);
+            }
+            return Math.sqrt(sum);
+        }
+
+        private void updateWeights(double[] input, int bmuX, int bmuY) {
+            int radius = iGridSide / 4;
+            for (int i = Math.max(0, bmuX - radius); i < Math.min(iGridSide, bmuX + radius); i++) {
+                for (int j = Math.max(0, bmuY - radius); j < Math.min(iGridSide, bmuY + radius); j++) {
+                    double dist = Math.sqrt(Math.pow(i - bmuX, 2) + Math.pow(j - bmuY, 2));
+                    double influence = Math.exp(-dist / (2 * radius * radius));
+                    for (int k = 0; k < iInputSize; k++) {
+                        dGrid[i][j][k] += dLearnRate * influence * (input[k] - dGrid[i][j][k]);
+                    }
+                }
+            }
+        }
+    }
+
+    private void clearLog() {
+        try (FileWriter fw = new FileWriter("RL_AgentsLog.out", false)) {
+            // Opening with false overwrites the file
+            fw.write("");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     private void writeLog(String log) {
 		FileWriter fichero = null;
 		PrintWriter pw = null;
 		try {
-			fichero = new FileWriter("RandomAgentsLog.out", true);
+			fichero = new FileWriter("RL_AgentsLog.out", true);
 			pw = new PrintWriter(fichero);
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -322,13 +364,4 @@ public class RandomAgent extends Agent {
 			}
 		}
 	}
-    
-    private void clearLog() {
-        try (FileWriter fw = new FileWriter("RandomAgentsLog.out", false)) {
-            // Opening with false overwrites the file
-            fw.write("");
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
 }

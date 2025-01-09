@@ -116,9 +116,7 @@ public class RL_Agent extends Agent {
                         } else if (msg.getContent().startsWith("GameOver") && msg.getPerformative() == ACLMessage.INFORM) {
                             writeLog(getAID().getName() + " Total payoff: " + msg.getContent().split("#")[2]);
                             state = State.s0NoConfig;
-                        } else {
-                            writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
-                        }
+                        } else writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         break;
 
                     case s2Round:
@@ -130,18 +128,14 @@ public class RL_Agent extends Agent {
                             writeLog(getAID().getName() + " sent " + response.getContent());
                             send(response);
                             state = State.s3AwaitingResult;
-                        } else {
-                            writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
-                        }
+                        } else writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         break;
 
                     case s3AwaitingResult:
                         if (msg.getPerformative() == ACLMessage.INFORM && msg.getContent().startsWith("Results")) {
                             processResults(msg.getContent());
                             state = State.s1AwaitingGame;
-                        } else {
-                            writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
-                        }
+                        } else writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         break;
                 }
             }
@@ -272,32 +266,6 @@ public class RL_Agent extends Agent {
         }
     }
 
-    private void clearLog() {
-        try (FileWriter fw = new FileWriter("RL_AgentsLog.out", false)) {
-            // Opening with false overwrites the file
-            fw.write("");
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void writeLog(String log) {
-		FileWriter fichero = null;
-		PrintWriter pw = null;
-		try {
-			fichero = new FileWriter("RL_AgentsLog.out", true);
-			pw = new PrintWriter(fichero);
-		} catch (Exception e) {
-			e.printStackTrace();
-		} finally {
-			try {
-				pw.write(log + "\n");
-				if (null != fichero) fichero.close();
-			} catch (Exception e2) {
-				e2.printStackTrace();
-			}
-		}
-	}
     private class StateAction {
         private HashMap<String, double[]> hmQValues;  // Q-values for each state-action
         private HashMap<String, int[]> hmVisits;      // Number of visits for each state-action
@@ -397,4 +365,31 @@ public class RL_Agent extends Agent {
             return bestAction;
         }
     }
+
+    private void clearLog() {
+        try (FileWriter fw = new FileWriter("RL_AgentsLog.out", false)) {
+            // Opening with false overwrites the file
+            fw.write("");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void writeLog(String log) {
+		FileWriter fichero = null;
+		PrintWriter pw = null;
+		try {
+			fichero = new FileWriter("RL_AgentsLog.out", true);
+			pw = new PrintWriter(fichero);
+		} catch (Exception e) {
+			e.printStackTrace();
+		} finally {
+			try {
+				pw.write(log + "\n");
+				if (null != fichero) fichero.close();
+			} catch (Exception e2) {
+				e2.printStackTrace();
+			}
+		}
+	}
 }
