@@ -17,11 +17,27 @@ public class PSI_4 extends Agent {
     private State state;
     private AID mainAgent;
     private int myId, opponentId;
+    /**
+     * N = Number of players
+     * R = Rounds
+     * F = Fee
+     * P = Payoff
+     * A = Assets
+     * S = Score
+     * I = Inflation
+     **/
     private int N, R, S, I;
     private double F, A, P;
     private ACLMessage msg;
-    private boolean hasOpponentDefected = false;  // Memory of opponent's defection
     private Random random = new Random();
+
+    // private boolean hasOpponentDefected = false;  // Memory of opponent's defection
+    private boolean[] opponentDefections;  // Track each opponent separately
+
+    // NN_Agent implementation for Transaction
+    private SOM neuralNet;
+    private static final int GRID_SIDE = 5;
+    private static final int INPUT_SIZE = 4;
 
     private enum State {
         s0NoConfig, s1AwaitingGame, s2Round, s3AwaitingResult
@@ -31,6 +47,7 @@ public class PSI_4 extends Agent {
     protected void setup() {
         state = State.s0NoConfig;
         clearLog();
+        neuralNet = new SOM(GRID_SIDE, INPUT_SIZE); // Initialize SOM
         
         DFAgentDescription dfd = new DFAgentDescription();
         dfd.setName(getAID());
@@ -44,7 +61,7 @@ public class PSI_4 extends Agent {
             fe.printStackTrace();
         }
         addBehaviour(new Play());
-        writeLog("PSI_4 " + getAID().getName() + " is ready.");
+        writeLog("Is ready");
     }
 
     private class Play extends CyclicBehaviour {
@@ -52,24 +69,33 @@ public class PSI_4 extends Agent {
         public void action() {
             msg = blockingReceive();
             if (msg != null) {
-                writeLog(getAID().getName() + ":" + state.name());
-                writeLog(getAID().getName() + "Recibio: " + msg.getContent());
+                writeLog(state.name());
+                writeLog("Recibio: " + msg.getContent());
                 
                 switch (state) {
                     case s0NoConfig:
                         if (msg.getContent().startsWith("Id") && msg.getPerformative() == ACLMessage.INFORM) {
-                            if(validateSetupMessage(msg)) {
-                                state = State.s1AwaitingGame;
+                            try {
+                                if (validateSetupMessage(msg)) {
+                                    writeLog("Is up with ID:" + myId);
+                                    state = State.s1AwaitingGame;
+                                }
+                            } catch (NumberFormatException e) {
+                                writeLog(state.name() + " - Bad message:\n\t" + msg.getContent());
                             }
+                            // Reset parameters
+                            P = 0.0;
+                            A = 0.0;
+                            // hasOpponentDefected = false;
+                            neuralNet = new SOM(GRID_SIDE, INPUT_SIZE);
+                            opponentDefections = new boolean[Integer.parseInt(msg.getContent().split("#")[2].split(",")[0])];
                         }
                         break;
 
                     case s1AwaitingGame:
                         if (msg.getContent().startsWith("NewGame")) {
-                            if(validateNewGame(msg.getContent())) {
-                                hasOpponentDefected = false;  // Reset for new game
+                            if(validateNewGame(msg.getContent()))
                                 state = State.s2Round;
-                            }
                         } else if (msg.getContent().startsWith("RoundOver")) {
                             processRoundOver(msg.getContent());
                             String decision = decideTransaction(Double.parseDouble(msg.getContent().split("#")[6]));
@@ -85,6 +111,7 @@ public class PSI_4 extends Agent {
                             ACLMessage response = new ACLMessage(ACLMessage.INFORM);
                             response.addReceiver(mainAgent);
                             response.setContent("Action#" + decidePrisonerAction());
+                            writeLog("Sent " + response.getContent());
                             send(response);
                             state = State.s3AwaitingResult;
                         }
@@ -101,11 +128,18 @@ public class PSI_4 extends Agent {
         }
 
         private String decidePrisonerAction() {
-            if (hasOpponentDefected) return "D";  // Permanent retaliation
-            return "C";  // Initial cooperation
+            /*
+             * past implementation:
+             * if (hasOpponentDefected) return "D";  // Permanent retaliation
+             * return "C";  // Initial cooperation
+             */
+            return opponentDefections[opponentId - 1] ? "D" : "C";
         }
 
         private void processResults(String content) {
+            /**
+             * Format: Results#id1,id2#action1,action2#payoff1,payoff2
+             */
             String[] parts = content.split("#");
             String[] idmsg = parts[1].split(",");
             String[] actions = parts[2].split(",");
@@ -122,35 +156,51 @@ public class PSI_4 extends Agent {
             }
             
             if (opponentAction.equals("D")) {
-                hasOpponentDefected = true;
+                /*
+                 * past implementation:
+                 * hasOpponentDefected = true;
+                 */
+                opponentDefections[opponentId - 1] = true;
             }
             
-            writeLog(getAID().getName() + " accumulated payoff: " + P);
+            writeLog("Accumulated payoff: " + P);
         }
 
-        // Reuse RandomAgent's transaction logic
+        // Adapt NN_Agent method to PSI_4
         private String decideTransaction(double indexValue) {
-            StringBuilder decision = new StringBuilder();
+            double[] tradingInput = new double[]{
+                P / Math.max(100.0, P),     // Normalized payoff
+                A / Math.max(10.0, A),      // Normalized assets
+                indexValue / 100.0,         // Normalized index
+                (state == State.s2Round ? 1.0 : 0.0)  // Game state
+            };
 
-            if (random.nextBoolean() && P > 0) {
+            String bmuPos = neuralNet.sGetBMU(tradingInput, true);
+            double[] weights = neuralNet.dGetNeuronWeights(
+                Integer.parseInt(bmuPos.split(",")[0]),
+                Integer.parseInt(bmuPos.split(",")[1])
+            );
+
+            StringBuilder decision = new StringBuilder();
+            double performance = P + (A * indexValue);
+
+            // More conservative trading strategy
+            if (weights[0] > 0.7 && P > 0) {  // Stronger buy signal threshold
                 double maxAffordable = P / (indexValue * (1 + F));
                 if (maxAffordable >= 1) {
-                    int buyAmount = random.nextInt((int)maxAffordable) + 1;
-                    decision.append("Buy#").append(buyAmount);
+                    double buyAmount = Math.min(maxAffordable * weights[0], maxAffordable * 0.5);
+                    decision.append("Buy#").append(String.format("%.2f", buyAmount));
                 }
-            }
-
-            if (random.nextBoolean() && A > 0) {
-                if (A >= 1.0) {
-                    double sellAmount = 1.0 + random.nextDouble() * (A - 1.0);
-                    if (decision.length() > 0) {
-                        decision.append(",");
-                    }
+            } else if (weights[1] > 0.6 && A > 0) {  // More selective selling
+                double sellAmount = Math.min(A, A * weights[1] * 0.5);
+                if (sellAmount >= 1.0) {
+                    if (decision.length() > 0) decision.append(",");
                     decision.append("Sell#").append(String.format("%.2f", sellAmount));
                 }
             }
 
-            return decision.length() == 0 ? "None" : decision.toString();
+            writeLog("Transaction: " + decision.toString());
+            return decision.length() > 0 ? decision.toString() : "None";
         }
 
         /**
@@ -215,7 +265,7 @@ public class PSI_4 extends Agent {
             if (parts.length == 4) {
                 P = Double.parseDouble(parts[2]);
                 A = Double.parseDouble(parts[3]);
-                writeLog(getAID().getName() + " updated accounting - Payoff: " + P + ", Assets: " + A);
+                writeLog("Updated accounting - Payoff: " + P + ", Assets: " + A);
             }
         }
 
@@ -225,7 +275,79 @@ public class PSI_4 extends Agent {
             if (parts.length == 7) {
                 P = Double.parseDouble(parts[3]);
                 A = Double.parseDouble(parts[5]);
-                writeLog(getAID().getName() + " round over - Payoff: " + P + ", Assets: " + A);
+                writeLog("Round over - Payoff: " + P + ", Assets: " + A);
+            }
+        }
+    }
+
+    private class SOM {
+        private int iGridSide;
+        private int iInputSize;
+        private double dLearnRate = 1.0;
+        private double dDecLearnRate = 0.999;
+        private double[][][] dGrid;
+
+        public SOM(int gridSize, int inputSize) {
+            iGridSide = gridSize;
+            iInputSize = inputSize;
+            dGrid = new double[iGridSide][iGridSide][iInputSize];
+            initializeGrid();
+        }
+
+        private void initializeGrid() {
+            for (int i = 0; i < iGridSide; i++)
+                for (int j = 0; j < iGridSide; j++)
+                    for (int k = 0; k < iInputSize; k++)
+                        dGrid[i][j][k] = Math.random();
+        }
+
+        public String sGetBMU(double[] input, boolean train) {
+            int bmuX = 0, bmuY = 0;
+            double minDist = Double.MAX_VALUE;
+
+            // Find BMU
+            for (int i = 0; i < iGridSide; i++) {
+                for (int j = 0; j < iGridSide; j++) {
+                    double dist = calculateDistance(input, dGrid[i][j]);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        bmuX = i;
+                        bmuY = j;
+                    }
+                }
+            }
+
+            // Update weights if training
+            if (train) {
+                updateWeights(input, bmuX, bmuY);
+                dLearnRate *= dDecLearnRate;
+            }
+
+            return bmuX + "," + bmuY;
+        }
+
+        public double[] dGetNeuronWeights(int x, int y) {
+            return dGrid[x][y];
+        }
+
+        private double calculateDistance(double[] input, double[] weights) {
+            double sum = 0;
+            for (int i = 0; i < input.length; i++) {
+                sum += Math.pow(input[i] - weights[i], 2);
+            }
+            return Math.sqrt(sum);
+        }
+
+        private void updateWeights(double[] input, int bmuX, int bmuY) {
+            int radius = iGridSide / 4;
+            for (int i = Math.max(0, bmuX - radius); i < Math.min(iGridSide, bmuX + radius); i++) {
+                for (int j = Math.max(0, bmuY - radius); j < Math.min(iGridSide, bmuY + radius); j++) {
+                    double dist = Math.sqrt(Math.pow(i - bmuX, 2) + Math.pow(j - bmuY, 2));
+                    double influence = Math.exp(-dist / (2 * radius * radius));
+                    for (int k = 0; k < iInputSize; k++) {
+                        dGrid[i][j][k] += dLearnRate * influence * (input[k] - dGrid[i][j][k]);
+                    }
+                }
             }
         }
     }
@@ -234,13 +356,13 @@ public class PSI_4 extends Agent {
 		FileWriter fichero = null;
 		PrintWriter pw = null;
 		try {
-			fichero = new FileWriter("RandomAgentsLog.out", true);
+			fichero = new FileWriter("PSI_4.out", true);
 			pw = new PrintWriter(fichero);
 		} catch (Exception e) {
 			e.printStackTrace();
 		} finally {
 			try {
-				pw.write(log + "\n");
+				pw.write(getAID().getName() + " : " + log + "\n");
 				if (null != fichero) fichero.close();
 			} catch (Exception e2) {
 				e2.printStackTrace();
@@ -249,7 +371,7 @@ public class PSI_4 extends Agent {
 	}
     
     private void clearLog() {
-        try (FileWriter fw = new FileWriter("RandomAgentsLog.out", false)) {
+        try (FileWriter fw = new FileWriter("PSI_4.out", false)) {
             // Opening with false overwrites the file
             fw.write("");
         } catch (Exception e) {

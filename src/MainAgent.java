@@ -551,7 +551,7 @@ public class MainAgent extends Agent {
 
         public GameParametersStruct() {
             N = 3; // Se actualiza en GameManager.action()
-            R = 100;
+            R = 500;
             F = 0.01;
             S = 4;
             I = 0;

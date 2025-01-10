@@ -31,6 +31,8 @@ public class NN_Agent extends Agent {
     private double F, A, P;
     private ACLMessage msg;
     private SOM neuralNet;
+    private static final int GRID_SIDE = 5;
+    private static final int INPUT_SIZE = 4;
     private String currentState;
     
     private enum State {
@@ -41,7 +43,7 @@ public class NN_Agent extends Agent {
     protected void setup() {
         clearLog();
         state = State.s0NoConfig;
-        neuralNet = new SOM(5, 4); // 5x5 grid, 4 input dimensions
+        neuralNet = new SOM(GRID_SIDE, INPUT_SIZE); // 5x5 grid, 4 input dimensions
         
         DFAgentDescription dfd = new DFAgentDescription();
         dfd.setName(getAID());
@@ -55,7 +57,7 @@ public class NN_Agent extends Agent {
             fe.printStackTrace();
         }
         addBehaviour(new Play());
-        writeLog("NNAgent " + getAID().getName() + " is ready.");
+        writeLog("Is ready.");
     }
 
     private class Play extends CyclicBehaviour {
@@ -63,21 +65,26 @@ public class NN_Agent extends Agent {
         public void action() {
             msg = blockingReceive();
             if (msg != null) {
-                writeLog(getAID().getName() + ":" + state.name());
-                writeLog(getAID().getName() + "Recibio: " + msg.getContent());
+                writeLog(state.name());
+                writeLog("Recibio: " + msg.getContent());
                 
                 switch (state) {
                     case s0NoConfig:
                         if (msg.getContent().startsWith("Id") && msg.getPerformative() == ACLMessage.INFORM) {
                             try {
                                 if (validateSetupMessage(msg)) {
-                                    writeLog("NNAgent " + getAID().getName() + " is up with ID:" + myId);
+                                    writeLog("Is up with ID:" + myId);
                                     state = State.s1AwaitingGame;
                                 }
                             } catch (NumberFormatException e) {
-                                writeLog(getAID().getName() + ": Bad configuration message");
+                                writeLog("Bad configuration message");
                             }
+                            // Reset parameters
+                            P = 0.0;
+                            A = 0.0;
+                            neuralNet = new SOM(GRID_SIDE, INPUT_SIZE);
                         } else if (msg.getContent().equals("Removed") && msg.getPerformative() == ACLMessage.INFORM) {
+                            writeLog("Removed");
                             doDelete();
                         }
                         break;
@@ -86,11 +93,11 @@ public class NN_Agent extends Agent {
                         if (msg.getContent().startsWith("NewGame") && msg.getPerformative() == ACLMessage.INFORM) {
                             try {
                                 if (validateNewGame(msg.getContent())) {
-                                    writeLog(getAID().getName() + " is playing against " + opponentId);
+                                    writeLog("is playing against " + opponentId);
                                     state = State.s2Round;
                                 }
                             } catch (NumberFormatException e) {
-                                writeLog(getAID().getName() + ": Bad new game message");
+                                writeLog("Bad new game message");
                             }
                         } else if (msg.getContent().startsWith("RoundOver") && msg.getPerformative() == ACLMessage.REQUEST) {
                             processRoundOver(msg.getContent());
@@ -99,14 +106,14 @@ public class NN_Agent extends Agent {
                             String decision = decideTransaction(Double.parseDouble(msg.getContent().split("#")[6]));
                             response.setContent(decision);
                             send(response);
-                            writeLog(getAID().getName() + " decided: " + decision);
+                            writeLog("Decided: " + decision);
                         } else if (msg.getContent().startsWith("Accounting") && msg.getPerformative() == ACLMessage.INFORM) {
                             processAccounting(msg.getContent());
                         } else if (msg.getContent().startsWith("GameOver") && msg.getPerformative() == ACLMessage.INFORM) {
-                            writeLog(getAID().getName() + " Total payoff: " + msg.getContent().split("#")[2]);
+                            writeLog("Total payoff: " + msg.getContent().split("#")[2]);
                             state = State.s0NoConfig;
                         } else {
-                            writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
+                            writeLog(state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         }
                         break;
 
@@ -118,14 +125,14 @@ public class NN_Agent extends Agent {
                             response.setContent("Action#" + action);
                             send(response);
                             state = State.s3AwaitingResult;
-                        } else writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
+                        } else writeLog(state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         break;
 
                     case s3AwaitingResult:
                         if (msg.getPerformative() == ACLMessage.INFORM && msg.getContent().startsWith("Results")) {
                             processResults(msg.getContent());
                             state = State.s1AwaitingGame;
-                        } else writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
+                        } else writeLog(state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         break;
                 }
             }
@@ -198,26 +205,39 @@ public class NN_Agent extends Agent {
         }
 
         private String decideTransaction(double indexValue) {
-            double[] input = createInputVector();
-            String bmuPos = neuralNet.sGetBMU(input, true);
+            double[] tradingInput = new double[]{
+                P / Math.max(100.0, P),     // Normalized payoff
+                A / Math.max(10.0, A),      // Normalized assets
+                indexValue / 100.0,         // Normalized index
+                (state == State.s2Round ? 1.0 : 0.0)  // Game state
+            };
+
+            String bmuPos = neuralNet.sGetBMU(tradingInput, true);
             double[] weights = neuralNet.dGetNeuronWeights(
-                Integer.parseInt(bmuPos.split(",")[0]), 
+                Integer.parseInt(bmuPos.split(",")[0]),
                 Integer.parseInt(bmuPos.split(",")[1])
             );
-            
-            if (weights[2] > 0.66) { // Buy decision
-                if (P > 0) {
-                    double maxAffordable = P / (indexValue * (1 + F));
-                    if (maxAffordable >= 1) {
-                        return "Buy#1";
-                    }
+
+            StringBuilder decision = new StringBuilder();
+            double performance = P + (A * indexValue);
+
+            // More conservative trading strategy
+            if (weights[0] > 0.7 && P > 0) {  // Stronger buy signal threshold
+                double maxAffordable = P / (indexValue * (1 + F));
+                if (maxAffordable >= 1) {
+                    double buyAmount = Math.min(maxAffordable * weights[0], maxAffordable * 0.5);
+                    decision.append("Buy#").append(String.format("%.2f", buyAmount));
                 }
-            } else if (weights[2] > 0.33) { // Sell decision
-                if (A > 0) {
-                    return "Sell#1";
+            } else if (weights[1] > 0.6 && A > 0) {  // More selective selling
+                double sellAmount = Math.min(A, A * weights[1] * 0.5);
+                if (sellAmount >= 1.0) {
+                    if (decision.length() > 0) decision.append(",");
+                    decision.append("Sell#").append(String.format("%.2f", sellAmount));
                 }
             }
-            return "None";
+
+            writeLog("Transaction: " + decision.toString());
+            return decision.length() > 0 ? decision.toString() : "None";
         }
 
         private double[] createInputVector() {
@@ -226,6 +246,8 @@ public class NN_Agent extends Agent {
             input[1] = A / 10.0;  // Normalized assets
             input[2] = opponentId / (double)N; // Normalized opponent ID
             input[3] = state == State.s2Round ? 1.0 : 0.0; // Game state
+    
+            writeLog(String.format("Input Vector: %.2f, %.2f, %.2f, %.2f", input[0], input[1], input[2], input[3]));
             return input;
         }
 
@@ -240,8 +262,8 @@ public class NN_Agent extends Agent {
             else myPayoff = Integer.parseInt(payoffs[1]);
             P += myPayoff;
 
-            writeLog(getAID().getName() + " received payoff: " + myPayoff);
-            writeLog(getAID().getName() + " accumulated payoff: " + P);
+            writeLog("received payoff: " + myPayoff);
+            writeLog("accumulated payoff: " + P);
         }
 
         private void processAccounting(String content) {
@@ -250,7 +272,7 @@ public class NN_Agent extends Agent {
             if (parts.length == 4) {
                 P = Double.parseDouble(parts[2]);
                 A = Double.parseDouble(parts[3]);
-                writeLog(getAID().getName() + " updated accounting - Payoff: " + P + ", Assets: " + A);
+                writeLog("updated accounting - Payoff: " + P + ", Assets: " + A);
             }
         }
 
@@ -260,7 +282,7 @@ public class NN_Agent extends Agent {
             if (parts.length == 7) {
                 P = Double.parseDouble(parts[3]);
                 A = Double.parseDouble(parts[5]);
-                writeLog(getAID().getName() + " round over - Payoff: " + P + ", Assets: " + A);
+                writeLog("round over - Payoff: " + P + ", Assets: " + A);
             }
         }
     }
@@ -269,15 +291,18 @@ public class NN_Agent extends Agent {
     private class SOM {
         private int iGridSide;
         private int iInputSize;
-        private double dLearnRate = 1.0;
+        private double dLearnRate = 0.3/*1.0*/;     // Reduced initial learning rate
         private double dDecLearnRate = 0.999;
+        private double dMinLearnRate = 0.01;
+        private double[] dBMU_Vector = null;
         private double[][][] dGrid;
 
         public SOM(int gridSize, int inputSize) {
             iGridSide = gridSize;
             iInputSize = inputSize;
+            dBMU_Vector = new double[iInputSize];
             dGrid = new double[iGridSide][iGridSide][iInputSize];
-            initializeGrid();
+            initializeGrid(); //vResetValues
         }
 
         private void initializeGrid() {
@@ -291,10 +316,13 @@ public class NN_Agent extends Agent {
             int bmuX = 0, bmuY = 0;
             double minDist = Double.MAX_VALUE;
 
+             // Normalize input vector
+            double[] normalizedInput = normalizeInput(input);
+            
             // Find BMU
             for (int i = 0; i < iGridSide; i++) {
                 for (int j = 0; j < iGridSide; j++) {
-                    double dist = calculateDistance(input, dGrid[i][j]);
+                    double dist = calculateDistance(normalizedInput, dGrid[i][j]);
                     if (dist < minDist) {
                         minDist = dist;
                         bmuX = i;
@@ -305,8 +333,10 @@ public class NN_Agent extends Agent {
 
             // Update weights if training
             if (train) {
-                updateWeights(input, bmuX, bmuY);
-                dLearnRate *= dDecLearnRate;
+                updateWeights(normalizedInput, bmuX, bmuY);
+
+                // Update learning rate with minimum threshold
+                dLearnRate = Math.max(dLearnRate * dDecLearnRate, dMinLearnRate);
             }
 
             return bmuX + "," + bmuY;
@@ -314,6 +344,14 @@ public class NN_Agent extends Agent {
 
         public double[] dGetNeuronWeights(int x, int y) {
             return dGrid[x][y];
+        }
+
+        public double[] dvGetBMU_Vector() {
+            return dBMU_Vector;
+        }
+
+        public double dGetLearnRate() {
+            return dLearnRate;
         }
 
         private double calculateDistance(double[] input, double[] weights) {
@@ -325,21 +363,46 @@ public class NN_Agent extends Agent {
         }
 
         private void updateWeights(double[] input, int bmuX, int bmuY) {
-            int radius = iGridSide / 4;
+            int radius = Math.max(1, iGridSide / 4)/*iGridSide / 4*/;   // Dynamic radius
+            double sigma = radius / 2.0;
             for (int i = Math.max(0, bmuX - radius); i < Math.min(iGridSide, bmuX + radius); i++) {
                 for (int j = Math.max(0, bmuY - radius); j < Math.min(iGridSide, bmuY + radius); j++) {
                     double dist = Math.sqrt(Math.pow(i - bmuX, 2) + Math.pow(j - bmuY, 2));
-                    double influence = Math.exp(-dist / (2 * radius * radius));
+                    double influence = Math.exp(-dist / (2 * sigma * sigma));
                     for (int k = 0; k < iInputSize; k++) {
                         dGrid[i][j][k] += dLearnRate * influence * (input[k] - dGrid[i][j][k]);
                     }
                 }
             }
         }
+
+        /**
+         * New funcions for the SOM
+         */
+        private double[] normalizeInput(double[] input) {
+            double[] normalized = input.clone();
+            double max = Double.MIN_VALUE;
+            double min = Double.MAX_VALUE;
+            
+            // Find min and max
+            for (double v : input) {
+                max = Math.max(max, v);
+                min = Math.min(min, v);
+            }
+            
+            // Normalize to [0,1]
+            if (max > min) {
+                for (int i = 0; i < input.length; i++) {
+                    normalized[i] = (input[i] - min) / (max - min);
+                }
+            }
+            
+            return normalized;
+        }
     }
 
     private void clearLog() {
-        try (FileWriter fw = new FileWriter("RL_AgentsLog.out", false)) {
+        try (FileWriter fw = new FileWriter("NN_AgentsLog.out", false)) {
             // Opening with false overwrites the file
             fw.write("");
         } catch (Exception e) {
@@ -351,13 +414,13 @@ public class NN_Agent extends Agent {
 		FileWriter fichero = null;
 		PrintWriter pw = null;
 		try {
-			fichero = new FileWriter("RL_AgentsLog.out", true);
+			fichero = new FileWriter("NN_AgentsLog.out", true);
 			pw = new PrintWriter(fichero);
 		} catch (Exception e) {
 			e.printStackTrace();
 		} finally {
 			try {
-				pw.write(log + "\n");
+				pw.write(getAID().getName() + " : " + log + "\n");
 				if (null != fichero) fichero.close();
 			} catch (Exception e2) {
 				e2.printStackTrace();

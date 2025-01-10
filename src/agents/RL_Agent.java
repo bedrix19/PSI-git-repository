@@ -13,6 +13,7 @@ import java.io.FileWriter;
 import java.io.PrintWriter;
 import java.util.Random;
 import java.util.HashMap;
+import java.util.Vector;
 
 public class RL_Agent extends Agent {
     private State state;
@@ -30,8 +31,15 @@ public class RL_Agent extends Agent {
     private int N, R, S, I;
     private double F, A, P;
     private ACLMessage msg;
+
+    // Learning Q-Learning variables
     private LearningTools learningTools;
     private String currentState;
+
+    // Learning Automata variables
+    private double previousP = 0;
+    private double previousA = 0;
+    private double previousIndex = 0;
     
     private enum State {
         s0NoConfig, s1AwaitingGame, s2Round, s3AwaitingResult
@@ -59,7 +67,7 @@ public class RL_Agent extends Agent {
             fe.printStackTrace();
         }
         addBehaviour(new Play());
-        writeLog("RLAgent " + getAID().getName() + " is ready.");
+        writeLog("Is ready.");
     }
 
     private class Play extends CyclicBehaviour {
@@ -67,26 +75,33 @@ public class RL_Agent extends Agent {
         public void action() {
             msg = blockingReceive();
             if (msg != null) {
-                writeLog(getAID().getName() + ":" + state.name());
-                writeLog(getAID().getName() + "Recibio: " + msg.getContent());
+                writeLog(state.name());
+                writeLog("Recibio: " + msg.getContent());
                 
                 switch (state) {
                     case s0NoConfig:
                         if (msg.getContent().startsWith("Id") && msg.getPerformative() == ACLMessage.INFORM) {
-                            boolean parametersUpdated = false;
                             try {
-                                parametersUpdated = validateSetupMessage(msg);
+                                if (validateSetupMessage(msg)) {
+                                    writeLog("Is up with ID:" + myId);
+                                    state = State.s1AwaitingGame;
+                                }
                             } catch (NumberFormatException e) {
-                                writeLog(getAID().getName() + ":" + state.name() + " - Bad message:\n\t" + msg.getContent());
+                                writeLog(state.name() + " - Bad message:\n\t" + msg.getContent());
                             }
-                            if (parametersUpdated) {
-                                writeLog("RLAgent " + getAID().getName() + " is up with ID:" + myId);
-                                state = State.s1AwaitingGame;
-                            }
+                            // Reset parameters
+                            P = 0.0;
+                            A = 0.0;
+                            learningTools = new LearningTools();
+                            previousP = 0.0;
+                            previousA = 0.0;
+                            previousIndex = 0.0;
+                            currentState = ""; 
                         } else if (msg.getContent().equals("Removed") && msg.getPerformative() == ACLMessage.INFORM) {
+                            writeLog("Removed");
                             doDelete();
                         } else {
-                            writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
+                            writeLog(state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         }
                         break;
 
@@ -96,7 +111,7 @@ public class RL_Agent extends Agent {
                             try {
                                 gameStarted = validateNewGame(msg.getContent());
                             } catch (NumberFormatException e) {
-                                writeLog(getAID().getName() + ":" + state.name() + " - Bad message:\n\t" + msg.getContent());
+                                writeLog(state.name() + " - Bad message:\n\t" + msg.getContent());
                             }
                             if (gameStarted) {
                                 currentState = "Game" + opponentId;
@@ -110,13 +125,13 @@ public class RL_Agent extends Agent {
                             String decision = decideTransaction(Double.parseDouble(msg.getContent().split("#")[6]));
                             response.setContent(decision);
                             send(response);
-                            writeLog(getAID().getName() + " decided: " + decision);
+                            writeLog("Decided: " + decision);
                         } else if (msg.getContent().startsWith("Accounting") && msg.getPerformative() == ACLMessage.INFORM) {
                             processAccounting(msg.getContent());
                         } else if (msg.getContent().startsWith("GameOver") && msg.getPerformative() == ACLMessage.INFORM) {
-                            writeLog(getAID().getName() + " Total payoff: " + msg.getContent().split("#")[2]);
+                            writeLog("Total payoff: " + msg.getContent().split("#")[2]);
                             state = State.s0NoConfig;
-                        } else writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
+                        } else writeLog(state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         break;
 
                     case s2Round:
@@ -128,14 +143,14 @@ public class RL_Agent extends Agent {
                             writeLog(getAID().getName() + " sent " + response.getContent());
                             send(response);
                             state = State.s3AwaitingResult;
-                        } else writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
+                        } else writeLog(state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         break;
 
                     case s3AwaitingResult:
                         if (msg.getPerformative() == ACLMessage.INFORM && msg.getContent().startsWith("Results")) {
                             processResults(msg.getContent());
                             state = State.s1AwaitingGame;
-                        } else writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
+                        } else writeLog(state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         break;
                 }
             }
@@ -203,7 +218,7 @@ public class RL_Agent extends Agent {
             if (parts.length == 7) {
                 P = Double.parseDouble(parts[3]);
                 A = Double.parseDouble(parts[5]);
-                writeLog(getAID().getName() + " round over - Payoff: " + P + ", Assets: " + A);
+                writeLog("Round over - Payoff: " + P + ", Assets: " + A);
             }
         }
 
@@ -213,7 +228,7 @@ public class RL_Agent extends Agent {
             if (parts.length == 4) {
                 P = Double.parseDouble(parts[2]);
                 A = Double.parseDouble(parts[3]);
-                writeLog(getAID().getName() + " updated accounting - Payoff: " + P + ", Assets: " + A);
+                writeLog("Updated accounting - Payoff: " + P + ", Assets: " + A);
             }
         }
 
@@ -242,27 +257,58 @@ public class RL_Agent extends Agent {
         }
 
         private String decideTransaction(double indexValue) {
-            // Use learning for transaction decisions
-            String transactionState = "Transaction" + (int)indexValue;
-            learningTools.vGetNewActionQLearning(transactionState, 3, P); // 3 actions: buy, sell, none
+            learningTools.setIndexValue(indexValue);  // Set current index value
+            String transactionState = String.format("T%.2f_P%.2f_A%.2f", indexValue, P, A); // Create a more informative state representation
+            learningTools.vGetNewActionAutomata(transactionState, 3, calculateReward(indexValue)); // Use Learning Automata for transaction decisions (3 actions: buy, sell, none)
             
             int decision = learningTools.iNewAction2Play;
+            StringBuilder result = new StringBuilder();
+            
             switch(decision) {
                 case 0: // Buy
                     if (P > 0) {
                         double maxAffordable = P / (indexValue * (1 + F));
                         if (maxAffordable >= 1) {
-                            return "Buy#1";
+                            // Calculate buy amount based on learning
+                            double confidence = learningTools.oPresentStateAction.dGetQAction(0);
+                            int buyAmount = Math.max(1, (int)(maxAffordable * confidence));
+                            result.append("Buy#").append(buyAmount);
                         }
                     }
                     break;
+                    
                 case 1: // Sell
                     if (A > 0) {
-                        return "Sell#1";
+                        // Calculate sell amount based on learning
+                        double confidence = learningTools.oPresentStateAction.dGetQAction(1);
+                        double sellAmount = Math.min(A, A * confidence);
+                        if (sellAmount >= 1.0) {
+                            result.append("Sell#").append(String.format("%.2f", sellAmount));
+                        }
                     }
                     break;
+                    
+                case 2: // None
+                    return "None";
             }
-            return "None";
+            
+            writeLog("Transaction: " + result.toString());
+            return result.length() == 0 ? "None" : result.toString();
+        }
+
+        private double calculateReward(double indexValue) {
+            // Calculate reward based on multiple factors
+            double assetValue = A * indexValue;
+            double totalValue = P + assetValue;
+            double previousTotalValue = previousP + previousA * previousIndex;
+            
+            // Store current values for next iteration
+            previousP = P;
+            previousA = A;
+            previousIndex = indexValue;
+            
+            // Return relative change in total value
+            return previousTotalValue > 0 ? (totalValue - previousTotalValue) / previousTotalValue : 0.0;
         }
     }
 
@@ -271,10 +317,28 @@ public class RL_Agent extends Agent {
         private HashMap<String, int[]> hmVisits;      // Number of visits for each state-action
         private double[] dQVal;                       // Q-values for current state
         private int[] iVisits;                        // Visits for current state
+        String sState;
+        double[] dValAction;
+        double[] dQAction;
         
         public StateAction() {
             hmQValues = new HashMap<>();
             hmVisits = new HashMap<>();
+        }
+
+        public StateAction(String sAuxState, int iNActions) {
+            sState = sAuxState;
+            dValAction = new double[iNActions];
+            dQAction = new double[iNActions];
+        }
+
+        public StateAction(String sAuxState, int iNActions, boolean bLA) {
+            this(sAuxState, iNActions);
+            if (bLA) {
+                for (int i = 0; i < iNActions; i++) {
+                    dValAction[i] = 1.0 / iNActions;
+                }
+            }
         }
         
         public void vInitialize(String sState, int iActions) {
@@ -299,6 +363,10 @@ public class RL_Agent extends Agent {
         public int[] getVisits(String sState) {
             return hmVisits.get(sState);
         }
+
+        public double dGetQAction(int i) {
+            return dQAction[i];
+        }
         
         public void updateQValue(String sState, int iAction, double dValue) {
             double[] qValues = hmQValues.get(sState);
@@ -317,31 +385,34 @@ public class RL_Agent extends Agent {
         private final double dDecFactorLR = 0.99;   // Learning rate decay
         private final double dEpsilon = 0.95;       // Exploration rate
         private final double dMINLearnRate = 0.05;  // Minimum learning rate
+        private double dLearnRate = 1.0;
+        private double dGamma = 0.9;
+
+        private boolean bAllActions = false;
+        private int iNewAction2Play;
+        private int iLastAction;
+        private StateAction oPresentStateAction;
+        private StateAction oLastStateAction;
+        private Vector<StateAction> oVStateActions;
         private Random random;
         private StateAction stateAction;
-        public int iNewAction2Play;
+        private double indexValue;
         
         public LearningTools() {
             random = new Random();
             stateAction = new StateAction();
+            oVStateActions = new Vector<>();
         }
         
         public void vGetNewActionQLearning(String sState, int iNActions, double dReward) {
-            if (!stateAction.bIsState(sState)) {
-                stateAction.vInitialize(sState, iNActions);
-            }
+            if (!stateAction.bIsState(sState)) stateAction.vInitialize(sState, iNActions);
             
             double[] qValues = stateAction.getQValues(sState);
             int[] visits = stateAction.getVisits(sState);
             
             // Exploration vs Exploitation
-            if (random.nextDouble() > dEpsilon) {
-                // Exploration: choose random action
-                iNewAction2Play = random.nextInt(iNActions);
-            } else {
-                // Exploitation: choose best action
-                iNewAction2Play = getBestAction(qValues);
-            }
+            if (random.nextDouble() > dEpsilon) iNewAction2Play = random.nextInt(iNActions); // Exploration: choose random action
+            else iNewAction2Play = getBestAction(qValues); // Exploitation: choose best action
             
             // Update Q-value for the chosen action
             double learningRate = Math.max(dMINLearnRate, 1.0 / (1 + visits[iNewAction2Play]));
@@ -352,6 +423,49 @@ public class RL_Agent extends Agent {
             stateAction.incrementVisits(sState, iNewAction2Play);
         }
         
+        public void vGetNewActionAutomata (String sState, int iNActions, double dReward) {
+            boolean bFound = false;       // Searching if we already have the state
+
+            // Search for existing state
+            for (StateAction oStateProbs : oVStateActions) {
+                if (oStateProbs.sState.equals(sState)) {
+                    oPresentStateAction = oStateProbs;
+                    bFound = true;
+                    break;
+                }
+            }
+
+            // If we didn't find it, then we add it                                                                    
+            if (!bFound) {
+                oPresentStateAction = new StateAction (sState, iNActions, true);
+                oVStateActions.add (oPresentStateAction);
+            }
+
+            // Adjusting Probabilities 
+            if (oLastStateAction != null && dReward > 0) {                  // If reward grows and the previous action was allowed --> reinforce last action
+                for (int i=0; i<iNActions; i++)
+                    if (i == iLastAction) oLastStateAction.dValAction[i] += dLearnRate * (1.0 - oLastStateAction.dValAction[i]); // Reinforce the last action
+                    else oLastStateAction.dValAction[i] *= (1.0 - dLearnRate);  // The rest are weakened
+            }
+            
+            double dValAcc = 0;       // Generating the new action based on probabilities
+            double dValRandom = Math.random();
+            for (int i=0; i<iNActions; i++) {
+                dValAcc += oPresentStateAction.dValAction[i];
+                if (dValRandom < dValAcc) {
+                    iNewAction2Play = i;
+                    break;
+                }
+            }
+
+            oLastStateAction = oPresentStateAction;   // Updating values for the next time
+            dLearnRate *= dDecFactorLR;     // Reducing the learning rate
+            if (dLearnRate < dMINLearnRate) dLearnRate = dMINLearnRate;
+        }
+
+        public void setIndexValue(double value) {
+            this.indexValue = value;
+        }
         private int getBestAction(double[] qValues) {
             int bestAction = 0;
             double bestValue = qValues[0];
@@ -385,7 +499,7 @@ public class RL_Agent extends Agent {
 			e.printStackTrace();
 		} finally {
 			try {
-				pw.write(log + "\n");
+				pw.write(getAID().getName() + " : " + log + "\n");
 				if (null != fichero) fichero.close();
 			} catch (Exception e2) {
 				e2.printStackTrace();

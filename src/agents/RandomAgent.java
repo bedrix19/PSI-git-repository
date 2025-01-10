@@ -56,7 +56,7 @@ public class RandomAgent extends Agent {
             fe.printStackTrace();
         }
         addBehaviour(new Play());
-        writeLog("RandomAgent " + getAID().getName() + " is ready.");
+        writeLog("Is ready.");
 
     }
 
@@ -67,7 +67,7 @@ public class RandomAgent extends Agent {
         } catch (FIPAException e) {
             e.printStackTrace();
         }
-        writeLog("RandomPlayer: " + getAID().getName() + " deregistering from yellow pages.");
+        writeLog("Deregistering from yellow pages.");
     }
 
     private class Play extends CyclicBehaviour {
@@ -77,8 +77,8 @@ public class RandomAgent extends Agent {
             msg = blockingReceive();
             if (msg != null) {
                 //-------- Agent logic
-                writeLog(getAID().getName() + ":" + state.name());
-                writeLog(getAID().getName() + "Recibio: "+msg.getContent());
+                writeLog(state.name());
+                writeLog("Recibio: "+msg.getContent());
                 switch (state) {
                     case s0NoConfig:
                         //If INFORM Id#_#_,_,_,_ PROCESS SETUP --> go to state 1
@@ -87,17 +87,20 @@ public class RandomAgent extends Agent {
                             boolean parametersUpdated = false;
                             try {
                                 if(validateSetupMessage(msg)){
-                                    writeLog("RandomAgent " + getAID().getName() + " is up with ID:" + myId);
+                                    writeLog("RandomAgent is up with ID:" + myId);
                                     state = State.s1AwaitingGame;
                                 }
                             } catch (NumberFormatException e) {
-                                writeLog(getAID().getName() + ":" + state.name() + " - Bad message:\n\t"+msg.getContent());
+                                writeLog(state.name() + " - Bad message:\n\t"+msg.getContent());
                             }
-
+                            // Reset parameters
+                            P = 0.0;
+                            A = 0.0;
                         }  else if (msg.getContent().equals("Removed") && msg.getPerformative() == ACLMessage.INFORM) {
+                            writeLog("Removed");
                             doDelete();
                         } else {
-                            writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t"+msg.getContent());
+                            writeLog(state.name() + " - Unexpected message:\n\t"+msg.getContent());
                         }
                         break;
                     case s1AwaitingGame:
@@ -107,11 +110,11 @@ public class RandomAgent extends Agent {
                         if (msg.getContent().startsWith("NewGame") && msg.getPerformative() == ACLMessage.INFORM){
                             try {
                                 if(validateNewGame(msg.getContent())){
-                                    writeLog(getAID().getName() + " is playing against " + opponentId);
+                                    writeLog("is playing against " + opponentId);
                                     state = State.s2Round;
                                 }
                             } catch (NumberFormatException e) {
-                                writeLog(getAID().getName() + ":" + state.name() + " - Bad message:\n\t" + msg.getContent());
+                                writeLog(state.name() + " - Bad message:\n\t" + msg.getContent());
                             }
                         }  else if (msg.getContent().startsWith("RoundOver") && msg.getPerformative() == ACLMessage.REQUEST) {
                             processRoundOver(msg.getContent());
@@ -126,13 +129,13 @@ public class RandomAgent extends Agent {
                             String decision = decideTransaction(Double.parseDouble(msg.getContent().split("#")[6]));
                             response.setContent(decision);
                             send(response);
-                            writeLog(getAID().getName() + " decided: " + decision);
+                            writeLog("decided: " + decision);
                         } else if (msg.getContent().startsWith("Accounting") && msg.getPerformative() == ACLMessage.INFORM) {
                             processAccounting(msg.getContent());
                         } else if (msg.getContent().startsWith("GameOver") && msg.getPerformative() == ACLMessage.INFORM) {
-                            writeLog(getAID().getName() + " Total payoff: " + msg.getContent().split("#")[2]);
+                            writeLog("Total payoff: " + msg.getContent().split("#")[2]);
                             state = State.s0NoConfig;
-                        } else writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
+                        } else writeLog(state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         break;
                     case s2Round:
                         //If REQUEST POSITION --> INFORM POSITION --> go to state 3
@@ -142,10 +145,10 @@ public class RandomAgent extends Agent {
                             ACLMessage msg = new ACLMessage(ACLMessage.INFORM);
                             msg.addReceiver(mainAgent);
                             msg.setContent("Action#" + randomOption());
-                            writeLog(getAID().getName() + " sent " + msg.getContent());
+                            writeLog("sent " + msg.getContent());
                             send(msg);
                             state = State.s3AwaitingResult;
-                        } else writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
+                        } else writeLog(state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         break;
                     case s3AwaitingResult:
                         //If INFORM RESULTS --> go to state 2
@@ -154,7 +157,7 @@ public class RandomAgent extends Agent {
                             // Procesar resultados
                             processResults(msg.getContent());
                             state = State.s1AwaitingGame;
-                        } else writeLog(getAID().getName() + ":" + state.name() + " - Unexpected message:\n\t" + msg.getContent());
+                        } else writeLog(state.name() + " - Unexpected message:\n\t" + msg.getContent());
                         break;
 
                 }
@@ -263,6 +266,7 @@ public class RandomAgent extends Agent {
 
             if (decision.length() == 0) return "None"; // If no decision was made, return "None"
 
+            writeLog("Transaction: " + decision.toString());
             return decision.toString();
         }
 
@@ -280,8 +284,8 @@ public class RandomAgent extends Agent {
             else myPayoff = Integer.parseInt(payoffs[1]);
             P += myPayoff;
 
-            writeLog(getAID().getName() + " received payoff: " + myPayoff);
-            writeLog(getAID().getName() + " accumulated payoff: " + P);
+            writeLog("received payoff: " + myPayoff);
+            writeLog("accumulated payoff: " + P);
         }
 
         private void processAccounting(String content) {
@@ -290,7 +294,7 @@ public class RandomAgent extends Agent {
             if (parts.length == 4) {
                 P = Double.parseDouble(parts[2]);
                 A = Double.parseDouble(parts[3]);
-                writeLog(getAID().getName() + " updated accounting - Payoff: " + P + ", Assets: " + A);
+                writeLog("updated accounting - Payoff: " + P + ", Assets: " + A);
             }
         }
 
@@ -300,7 +304,7 @@ public class RandomAgent extends Agent {
             if (parts.length == 7) {
                 P = Double.parseDouble(parts[3]);
                 A = Double.parseDouble(parts[5]);
-                writeLog(getAID().getName() + " round over - Payoff: " + P + ", Assets: " + A);
+                writeLog("round over - Payoff: " + P + ", Assets: " + A);
             }
         }
     }
@@ -315,7 +319,7 @@ public class RandomAgent extends Agent {
 			e.printStackTrace();
 		} finally {
 			try {
-				pw.write(log + "\n");
+				pw.write(getAID().getName() + " : " + log + "\n");
 				if (null != fichero) fichero.close();
 			} catch (Exception e2) {
 				e2.printStackTrace();
