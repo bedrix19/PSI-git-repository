@@ -1,5 +1,3 @@
-# Git-repository
- 
 Multi-Agent Trading System with Prisoner's Dilemma
 Project Overview
 A multi-agent system built with JADE framework that combines a Prisoner's Dilemma game with a trading market simulation. Agents compete in repeated games while managing assets and payoffs under dynamic market conditions with inflation.
